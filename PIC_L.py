@@ -10,7 +10,6 @@ import scipy.sparse as spp
 import scipy.sparse.linalg as sppla
 import gc as gc
 
-from numba import jit
 
 #enable garbage collection
 gc.enable()
@@ -286,6 +285,9 @@ def initialize(system,N,density,Kp,perturbation,dx,Ng,Te,L,X):
 	K = Kp * np.pi / (L+dx)
 	p2c = (L+dx) * density / N
 	kBTe = kb*Te #[J]
+	vthermal = np.sqrt(2.0 * kBTe / me)
+	LD = 7430.0 * np.sqrt(kBTe/e/density)
+	print('debye length * kp: ',LD*K)
 
 	if system=='bump-on-tail':
 		beam_proportion = N*2/6
@@ -302,11 +304,14 @@ def initialize(system,N,density,Kp,perturbation,dx,Ng,Te,L,X):
 	#end if
 
 	if system=='landau damping':
-		d_landau = -np.sqrt(np.pi) * wp**4 / K**3 / np.sqrt(kBTe/me)**3 * np.exp(- wp**2 / K**2 / np.sqrt(kBTe/me)**2 * np.exp(-3./2.))
+		#d_landau = -np.sqrt(np.pi) * wp**4 / K**3 / np.sqrt(kBTe/me)**3 * np.exp(- wp**2 / K**2 / np.sqrt(kBTe/me)**2 * np.exp(-3./2.))
+
+		d_landau = -np.sqrt(np.pi) * wp * (wp / K / vthermal)**3 * np.exp( -wp**2/K**2/vthermal**2)*np.exp(-3./2.)
 
 		#Assign velocity initial distribution function
 		v0 = np.zeros(N)
 		v0 = np.random.normal(0.0, np.sqrt(kBTe/me),N)
+		growth_rate = d_landau
 	#end if
 
 	if system=='two-stream':
@@ -340,20 +345,36 @@ def initialize(system,N,density,Kp,perturbation,dx,Ng,Te,L,X):
 #end def initialize
 
 def main_i(T,nplot):
-	tol = 1E-8
-	maxiter = 6
+	tol = 1E-6
+	maxiter = 20
 
-	density = 1E11 # [1/m3]
-	perturbation = 0.02
+	density = 1e10 # [1/m3]
+	perturbation = 0.01
 	Kp = 2
 	N = 40000
-	Ng = 20
+	Ng = 40
 
 	dt = 1E-8 #[s]
-	dx = 0.05	 #[m]
+	dx = 0.01	 #[m]
 
 	Ti = 0.1 * 11600. #[K]
-	Te = 4.0 * 11600. #[K]
+	Te = 10.0 * 11600. #[K]
+
+	tol = 1E-6
+	maxiter = 20
+
+	#Landau damping best params
+	#density = 1e10 # [1/m3]
+	#perturbation = 0.01
+	#Kp = 2
+	#N = 40000
+	#Ng = 40
+
+	#dt = 1E-8 #[s]
+	#dx = 0.1	 #[m]
+
+	#Ti = 0.1 * 11600. #[K]
+	#Te = 10.0 * 11600. #[K]
 
 	L = dx * (Ng-1)
 	X = np.linspace(0.0,L+dx,Ng+1)
@@ -363,7 +384,8 @@ def main_i(T,nplot):
 	K = Kp * np.pi / (L+dx)
 	p2c = (L+dx) * density / N
 
-	m,q,x0,v0,kBTe,growth_rate = initialize('bump-on-tail',N,density,Kp,perturbation,dx,Ng,Te,L,X)
+	system = 'bump-on-tail'
+	m,q,x0,v0,kBTe,growth_rate = initialize(system,N,density,Kp,perturbation,dx,Ng,Te,L,X)
 
 	print("wp : ",wp,"[1/s]")
 	print("dt : ",dt/invwp," [w * tau]")
@@ -509,9 +531,13 @@ def main_i(T,nplot):
 			plt.figure(5)
 			plt.clf()
 			plt.semilogy(TT,EE)
-			plt.semilogy(TT,np.min(EE)*np.exp(np.ones(np.size(TT))*growth_rate * TT))
+			if system == 'landau damping':
+				plt.semilogy(TT,np.max(EE)*np.exp(np.ones(np.size(TT))*growth_rate * TT))
+			else:
+				plt.semilogy(TT,np.min(EE)*np.exp(np.ones(np.size(TT))*growth_rate * TT))
 			plt.title('E^2, Implicit')
 			plt.draw()
+			plt.savefig('plots/e_'+str(t))
 			plt.pause(0.0001)
 
 			plt.figure(6)
@@ -528,20 +554,19 @@ def main_i(T,nplot):
 	plt.savefig('E2_I_m.png')
 #end main_i
 
-def main():
+def main(T,nplot):
 	tol = 1E-8
 	maxiter = 50
 
-	T = 10000
-	density = 1E11
-	perturbation = 0.02
-	Kp = 2
-	N = 80000
+	T = stop
+	density = 1E10
+	perturbation = 0.1
+	Kp = 100
+	N = 40000
 	Ng = 40
-	nplot = int(N/10)
 
-	dt = 5E-9
-	dx = 0.08
+	dt = 1E-9
+	dx = 0.4
 
 	L = dx * (Ng-1)
 	X = np.linspace(0.0,L+dx,Ng+1)
@@ -562,7 +587,7 @@ def main():
 	q =  -np.ones(N) * e
 
 	Ti = 0.1 * 11600. #[K]
-	Te = 2.0 * 11600. #[K]
+	Te = 4.0 * 11600. #[K]
 
 	kBTi = kb*Ti #[J]
 	kBTe = kb*Te #[J]
