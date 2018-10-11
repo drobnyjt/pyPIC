@@ -345,23 +345,33 @@ def initialize(system,N,density,Kp,perturbation,dx,Ng,Te,L,X):
 #end def initialize
 
 def main_i(T,nplot):
-	tol = 1E-6
+	tol = 1E-8
 	maxiter = 20
 
 	density = 1e10 # [1/m3]
 	perturbation = 0.01
 	Kp = 2
 	N = 40000
-	Ng = 40
+	Ng = 20
 
 	dt = 1E-8 #[s]
-	dx = 0.01	 #[m]
+	dx = 0.1	 #[m]
 
 	Ti = 0.1 * 11600. #[K]
-	Te = 10.0 * 11600. #[K]
+	Te = 1.0 * 11600. #[K]
 
-	tol = 1E-6
-	maxiter = 20
+	#Bump on tail best parameters
+	#density = 1e10 # [1/m3]
+	#perturbation = 0.01
+	#Kp = 2
+	#N = 40000
+	#Ng = 20
+
+	#dt = 1E-8 #[s]
+	#dx = 0.1	 #[m]
+
+	#Ti = 0.1 * 11600. #[K]
+	#Te = 1.0 * 11600. #[K]
 
 	#Landau damping best params
 	#density = 1e10 # [1/m3]
@@ -559,14 +569,14 @@ def main(T,nplot):
 	maxiter = 50
 
 	T = stop
-	density = 1E10
-	perturbation = 0.1
+	density = 1E12
+	perturbation = 0.01
 	Kp = 100
 	N = 40000
-	Ng = 40
+	Ng = 20
 
-	dt = 1E-9
-	dx = 0.4
+	dt = 1E-8
+	dx = 0.2
 
 	L = dx * (Ng-1)
 	X = np.linspace(0.0,L+dx,Ng+1)
@@ -587,7 +597,7 @@ def main(T,nplot):
 	q =  -np.ones(N) * e
 
 	Ti = 0.1 * 11600. #[K]
-	Te = 4.0 * 11600. #[K]
+	Te = 2.0 * 11600. #[K]
 
 	kBTi = kb*Ti #[J]
 	kBTe = kb*Te #[J]
