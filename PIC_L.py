@@ -10,6 +10,14 @@ import scipy.sparse as spp
 import scipy.sparse.linalg as sppla
 import gc as gc
 
+mpl.rc('font',**{'family':'sans-serif','sans-serif':['Helvetica'], 'size' : 12})
+## for Palatino and other serif fonts use:
+#rc('font',**{'family':'serif','serif':['Palatino']})
+mpl.rc('text', usetex=True)
+
+lw = 3.0
+
+np.random.seed(1)
 
 #enable garbage collection
 gc.enable()
@@ -348,43 +356,31 @@ def main_i(T,nplot):
 	tol = 1E-8
 	maxiter = 20
 
-	density = 1e10 # [1/m3]
-	perturbation = 0.01
-	Kp = 2
-	N = 40000
-	Ng = 20
-
-	dt = 1E-8 #[s]
-	dx = 0.1	 #[m]
-
-	Ti = 0.1 * 11600. #[K]
-	Te = 1.0 * 11600. #[K]
-
 	#Bump on tail best parameters
 	#density = 1e10 # [1/m3]
 	#perturbation = 0.01
-	#Kp = 2
-	#N = 40000
-	#Ng = 20
-
-	#dt = 1E-8 #[s]
-	#dx = 0.1	 #[m]
-
-	#Ti = 0.1 * 11600. #[K]
-	#Te = 1.0 * 11600. #[K]
-
-	#Landau damping best params
-	#density = 1e10 # [1/m3]
-	#perturbation = 0.01
-	#Kp = 2
-	#N = 40000
+	#Kp = 1
+	#N = 100000
 	#Ng = 40
 
 	#dt = 1E-8 #[s]
 	#dx = 0.1	 #[m]
 
 	#Ti = 0.1 * 11600. #[K]
-	#Te = 10.0 * 11600. #[K]
+	#Te = 2.0 * 11600. #[K]
+
+	#Landau damping best params
+	density = 1e10 # [1/m3]
+	perturbation = 0.05
+	Kp = 2
+	N = 100000
+	Ng = 100
+
+	dt = 5E-8 #[s]
+	dx = 0.04	 #[m]
+
+	Ti = 0.1 * 11600. #[K]
+	Te = 10.0 * 11600. #[K]
 
 	L = dx * (Ng-1)
 	X = np.linspace(0.0,L+dx,Ng+1)
@@ -394,7 +390,7 @@ def main_i(T,nplot):
 	K = Kp * np.pi / (L+dx)
 	p2c = (L+dx) * density / N
 
-	system = 'bump-on-tail'
+	system = 'landau damping'
 	m,q,x0,v0,kBTe,growth_rate = initialize(system,N,density,Kp,perturbation,dx,Ng,Te,L,X)
 
 	print("wp : ",wp,"[1/s]")
@@ -510,42 +506,44 @@ def main_i(T,nplot):
 		if (t % nplot == 0):
 			plt.figure(1)
 			plt.clf()
-			plt.scatter(x0,v0,s=0.5,color=scattermap)
+			plt.scatter(x0,v0/np.sqrt(kBTe/me),s=0.5,color=scattermap)
 			plt.title('Phase Space, Implicit')
-			plt.axis([0.0, L, -np.sqrt(kBTe/me) * 10., np.sqrt(kBTe/me) * 10.])
+			plt.axis([0.0, L+dx, -10., 10.])
+			plt.xticks([0.0, L+dx])
+			plt.yticks([-10.0, -5.0, 0.0, 5.0, 10.0])
 			plt.draw()
 			plt.savefig('plots/ps_'+str(t))
 			plt.pause(0.0001)
 
 			plt.figure(2)
 			plt.clf()
-			plt.plot(X,j0)
+			plt.plot(X,j0,linewidth=lw)
 			plt.title('Current, Implicit')
 			plt.draw()
 			plt.pause(0.0001)
 
 			plt.figure(3)
 			plt.clf()
-			plt.plot(X,E0)
+			plt.plot(X,E0,linewidth=lw)
 			plt.title('Electric Field, Implicit')
 			plt.draw()
 			plt.pause(0.0001)
 
 			plt.figure(4)
 			plt.clf()
-			plt.semilogy(TT,KE)
+			plt.semilogy(TT,KE,linewidth=lw)
 			plt.title('KE, Implicit')
 			plt.draw()
 			plt.pause(0.0001)
 
 			plt.figure(5)
 			plt.clf()
-			plt.semilogy(TT,EE)
+			plt.semilogy(TT,EE,linewidth=lw)
 			if system == 'landau damping':
-				plt.semilogy(TT,np.max(EE)*np.exp(np.ones(np.size(TT))*growth_rate * TT))
+				plt.semilogy(TT,np.max(EE)*np.exp(np.ones(np.size(TT))*growth_rate * TT),linewidth=lw)
 			else:
-				plt.semilogy(TT,np.min(EE)*np.exp(np.ones(np.size(TT))*growth_rate * TT))
-			plt.title('E^2, Implicit')
+				plt.semilogy(TT,np.min(EE)*np.exp(np.ones(np.size(TT))*growth_rate * TT),linewidth=lw)
+			plt.title('$E^{2}$, Implicit')
 			plt.draw()
 			plt.savefig('plots/e_'+str(t))
 			plt.pause(0.0001)
@@ -674,7 +672,7 @@ def main(T,nplot):
 
 			plt.figure(1)
 			plt.clf()
-			plt.scatter(x,v,s=0.2,color=scattermap)
+			plt.scatter(x,v,s=0.5,color=scattermap)
 			plt.title('Phase Space, Explicit')
 			plt.axis([0.0, L+dx, -np.sqrt(kBTe/me) * 8., np.sqrt(kBTe/me) * 8.])
 			plt.draw()
@@ -682,14 +680,14 @@ def main(T,nplot):
 
 			plt.figure(2)
 			plt.clf()
-			plt.plot(X,weightCurrentsPeriodic(x,q,v,p2c,Ng,N,dx))
+			plt.plot(X,weightCurrentsPeriodic(x,q,v,p2c,Ng,N,dx),linewidth=lw)
 			plt.title('Current, Explicit')
 			plt.draw()
 			plt.pause(0.0001)
 
 			plt.figure(3)
 			plt.clf()
-			plt.plot(X,E)
+			plt.plot(X,E,linewidth=lw)
 			plt.title('Electric Field, Explicit')
 			plt.draw()
 
@@ -697,21 +695,21 @@ def main(T,nplot):
 
 			plt.figure(4)
 			plt.clf()
-			plt.plot(X,-rho/e)
+			plt.plot(X,-rho/e,linewidth=lw)
 			plt.title('Density, Explicit')
 			plt.draw()
 			plt.pause(0.0001)
 
 			plt.figure(5)
 			plt.clf()
-			plt.semilogy(TT,KE)
+			plt.semilogy(TT,KE,linewidth=lw)
 			plt.title('KE, Explicit')
 			plt.draw()
 			plt.pause(0.0001)
 
 			plt.figure(6)
 			plt.clf()
-			plt.semilogy(TT,EE)
+			plt.semilogy(TT,EE,linewidth=lw)
 			plt.title('E^2, Explicit')
 			plt.draw()
 			plt.pause(0.0001)

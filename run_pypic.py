@@ -5,7 +5,7 @@ import convert as c
 
 def main():
 	start = 0
-	stop  = 1000
+	stop  = 80
 	skip  = 10
 	p.main_i(stop, skip)
 	#c.convert('plots','ps_i',start,stop,skip,'mov_i.gif')
