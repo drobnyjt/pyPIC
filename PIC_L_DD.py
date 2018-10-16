@@ -10,6 +10,13 @@ import scipy.sparse as spp
 import scipy.sparse.linalg as sppla
 import gc as gc
 
+mpl.rc('font',**{'family':'sans-serif','sans-serif':['Helvetica'], 'size' : 12})
+## for Palatino and other serif fonts use:
+#rc('font',**{'family':'serif','serif':['Palatino']})
+mpl.rc('text', usetex=True)
+
+lw = 3.0
+
 #from numba import jit
 
 #enable garbage collection
@@ -308,7 +315,7 @@ def main_i(T,nplot):
 	perturbation = 0.0
 	Kp = 1.0
 	N = 100000
-	Ng = 50
+	Ng = 51
 
 	dt = 1E-12 #[s]
 	dx = 0.00001	 #[m]
@@ -535,23 +542,32 @@ def main_i(T,nplot):
 		if (t % nplot == 0):
 			plt.figure(1)
 			plt.clf()
-			plt.scatter(x0[N/2:],np.sign(u0[N/2:])*u0[N/2:]*u0[N/2:]*0.5*m[N/2:]/e,s=0.5,color=scattermap[N/2:])
+			plt.scatter(x0[N/2:],np.sign(u0[N/2:])*u0[N/2:]*u0[N/2:]*0.5*m[N/2:]/e,s=2.0,color=scattermap[N/2:])
 			plt.title('Ion Phase Space')
 			plt.axis([0.0, L, -100.0, 100.0])
+			plt.xlabel('x [m]')
+			plt.xticks(np.linspace(0.0,L,5))
+			plt.yticks(np.linspace(-100.0,100.0,6))
+			plt.ylabel('v [thermal]')
 			plt.draw()
 			plt.savefig('plots/ps_i_'+str(t))
 			plt.pause(0.0001)
 
 			plt.figure(2)
 			plt.clf()
-			plt.plot(X,j0)
+			plt.plot(X,j0,linewidth=lw)
 			plt.title('J')
+			plt.xlabel('x [m]')
+			plt.xticks(np.linspace(0.0,L,5))
+			plt.ylabel('J [A/m2]')
 			plt.draw()
 			plt.pause(0.0001)
 
 			plt.figure(3)
 			plt.clf()
-			plt.plot(X,E0)
+			plt.plot(X,E0,linewidth=lw)
+			plt.xlabel('x [m]')
+			plt.ylabel('E [V/m]')
 			#plt.title('Electric Field, Implicit')
 			plt.draw()
 			plt.savefig('plots/e_'+str(t))
@@ -566,9 +582,11 @@ def main_i(T,nplot):
 
 			plt.figure(5)
 			plt.clf()
-			plt.semilogy(TT,EE)
-			plt.semilogy(TT,np.min(EE)*np.exp(np.ones(np.size(TT))*growth_rate * TT))
-			plt.title('E^2, Implicit')
+			plt.semilogy(TT,EE/np.max(EE),linewidth=lw)
+			#plt.semilogy(TT,np.min(EE)*np.exp(np.ones(np.size(TT))*growth_rate * TT))
+			plt.title('E2, Implicit')
+			plt.xlabel('t [s]')
+			plt.ylabel('E2 [A.U.]')
 			plt.draw()
 			plt.pause(0.0001)
 
@@ -589,6 +607,10 @@ def main_i(T,nplot):
 			plt.scatter(x0[:N/2],np.sign(u0[:N/2])*u0[:N/2]*u0[:N/2]*0.5*m[:N/2]/e,s=0.5,color=scattermap[:N/2])
 			plt.title('Electron Phase Space')
 			plt.axis([0.0, L, -100.0, 100.0])
+			plt.yticks(np.linspace(-100.0,100.0,6))
+			plt.xlabel('x [m]')
+			plt.xticks(np.linspace(0.0,L,5))
+			plt.ylabel('v [thermal]')
 			plt.draw()
 			plt.savefig('plots/ps_e_'+str(t))
 			plt.pause(0.0001)

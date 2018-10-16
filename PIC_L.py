@@ -297,6 +297,9 @@ def initialize(system,N,density,Kp,perturbation,dx,Ng,Te,L,X):
 	LD = 7430.0 * np.sqrt(kBTe/e/density)
 	print('debye length * kp: ',LD*K)
 
+	m = np.ones(N) * me
+	q =  -np.ones(N) * e
+
 	if system=='bump-on-tail':
 		beam_proportion = N*2/6
 		plasma_proportion = N*4/6
@@ -323,11 +326,21 @@ def initialize(system,N,density,Kp,perturbation,dx,Ng,Te,L,X):
 	#end if
 
 	if system=='two-stream':
-		pass
-	#end if
+		beam_1_proportion = N/2
+		beam_2_proportion = N - beam_1_proportion
+		beam_1_temperature = 1./40.
+		beam_2_temperature = 1./40.
+		beam_1_drift = 1.0
+		beam_2_drift = 0.0
 
-	m = np.ones(N) * me
-	q =  -np.ones(N) * e
+		v0 = np.zeros(N)
+		v0[0:beam_1_proportion] = np.random.normal(beam_1_drift * np.sqrt(kBTe/me), beam_1_temperature * np.sqrt(kBTe/me), beam_1_proportion)
+		v0[beam_1_proportion:] = np.random.normal(0.0, beam_2_temperature * np.sqrt(kBTe/mp), beam_2_proportion)
+		m[beam_1_proportion:] = mp
+
+		growth_rate = wp*(me/mp)**(1./3.)
+
+	#end if
 
 	#Apply perturbation by resampling particles from uniform distribution
 	x0 = np.random.uniform(0., L+dx, N)
@@ -357,30 +370,46 @@ def main_i(T,nplot):
 	maxiter = 20
 
 	#Bump on tail best parameters
+	system = 'bump-on-tail'
+	density = 1e10 # [1/m3]
+	perturbation = 0.01
+	Kp = 1
+	N = 100000
+	Ng = 40
+
+	dt = 1E-8 #[s]
+	dx = 0.1	 #[m]
+
+	Ti = 0.1 * 11600. #[K]
+	Te = 2.0 * 11600. #[K]
+
+	#Landau damping best params
+	#system = 'landau damping'
 	#density = 1e10 # [1/m3]
-	#perturbation = 0.01
-	#Kp = 1
+	#perturbation = 0.05
+	#Kp = 2
 	#N = 100000
+	#Ng = 100
+
+	#dt = 10E-8 #[s]
+	#dx = 0.04	 #[m]
+
+	#Ti = 0.1 * 11600. #[K]
+	#Te = 10.0 * 11600. #[K]
+
+	#Two-stream
+	#system = 'two-stream'
+	#density = 1e12 # [1/m3]
+	#perturbation = 0.01
+	#Kp = 2
+	#N = 40000
 	#Ng = 40
 
-	#dt = 1E-8 #[s]
-	#dx = 0.1	 #[m]
+	#dt = 5E-9 #[s]
+	#dx = 0.02	 #[m]
 
 	#Ti = 0.1 * 11600. #[K]
 	#Te = 2.0 * 11600. #[K]
-
-	#Landau damping best params
-	density = 1e10 # [1/m3]
-	perturbation = 0.05
-	Kp = 2
-	N = 100000
-	Ng = 100
-
-	dt = 5E-8 #[s]
-	dx = 0.04	 #[m]
-
-	Ti = 0.1 * 11600. #[K]
-	Te = 10.0 * 11600. #[K]
 
 	L = dx * (Ng-1)
 	X = np.linspace(0.0,L+dx,Ng+1)
@@ -390,7 +419,6 @@ def main_i(T,nplot):
 	K = Kp * np.pi / (L+dx)
 	p2c = (L+dx) * density / N
 
-	system = 'landau damping'
 	m,q,x0,v0,kBTe,growth_rate = initialize(system,N,density,Kp,perturbation,dx,Ng,Te,L,X)
 
 	print("wp : ",wp,"[1/s]")
@@ -509,6 +537,8 @@ def main_i(T,nplot):
 			plt.scatter(x0,v0/np.sqrt(kBTe/me),s=0.5,color=scattermap)
 			plt.title('Phase Space, Implicit')
 			plt.axis([0.0, L+dx, -10., 10.])
+			plt.xlabel('x [m]')
+			plt.ylabel('v [thermal]')
 			plt.xticks([0.0, L+dx])
 			plt.yticks([-10.0, -5.0, 0.0, 5.0, 10.0])
 			plt.draw()
@@ -518,13 +548,19 @@ def main_i(T,nplot):
 			plt.figure(2)
 			plt.clf()
 			plt.plot(X,j0,linewidth=lw)
+			plt.xticks([0.0, L+dx])
 			plt.title('Current, Implicit')
+			plt.xlabel('x [m]')
+			plt.ylabel('J [A/m2]')
 			plt.draw()
 			plt.pause(0.0001)
 
 			plt.figure(3)
 			plt.clf()
 			plt.plot(X,E0,linewidth=lw)
+			plt.xticks([0.0, L+dx])
+			plt.xlabel('x [m]')
+			plt.ylabel('E [V/m]')
 			plt.title('Electric Field, Implicit')
 			plt.draw()
 			plt.pause(0.0001)
@@ -532,6 +568,8 @@ def main_i(T,nplot):
 			plt.figure(4)
 			plt.clf()
 			plt.semilogy(TT,KE,linewidth=lw)
+			plt.xlabel('t [s]')
+			plt.ylabel('KE [J]')
 			plt.title('KE, Implicit')
 			plt.draw()
 			plt.pause(0.0001)
