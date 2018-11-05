@@ -72,8 +72,7 @@ def weightCurrents(x,q,v,p2c,Ng,N,dx,dt,active):
 def weightDensities(x,q,p2c,Ng,N,dx,active):
 	rho = np.zeros(Ng)
 
-	index = np.floor(x/dx) % (Ng)
-
+	index = np.floor(x/dx)
 	wR = (x % dx) / dx
 	wL = 1. - wR
 
@@ -82,10 +81,11 @@ def weightDensities(x,q,p2c,Ng,N,dx,active):
 	for i in range(N):
 		if active[i] == 1:
 			ind = int(index[i])
-			rho[ind] += q[i] * p2c * wL[i] * idx
+			rho[ind]   += q[i] * p2c * wL[i] * idx
 			rho[ind+1] += q[i] * p2c * wR[i] * idx
 		#end if
 	#end for
+
 	return rho
 #end def weightDensities
 
@@ -308,13 +308,13 @@ def initialize(system,N,density,Kp,perturbation,dx,Ng,Te,Ti,L,X):
 #end def initialize
 
 def main_i(T,nplot):
-	tol = 1E-8
-	maxiter = 100
+	tol = 1E-5
+	maxiter = 20
 
 	density = 1E19 # [1/m3]
 	perturbation = 0.0
 	Kp = 1.0
-	N = 100000
+	N = 40000
 	Ng = 51
 
 	dt = 1E-12 #[s]
@@ -322,7 +322,7 @@ def main_i(T,nplot):
 
 	Ti = 10.0 * 11600. #[K]
 	Te = 10.0 * 11600. #[K]
-	gamma = 0.001
+	gamma = 0.0
 
 	L = dx * (Ng-1)
 	X = np.linspace(0.0,L,Ng)
@@ -392,14 +392,12 @@ def main_i(T,nplot):
 	plt.ion()
 	#plt.figure(4)
 	#plt.ion()
-	plt.figure(5)
+	plt.figure(4)
 	plt.ion()
 	#plt.figure(6)
 	#plt.ion()
 	#plt.figure(7)
 	#plt.ion()
-	plt.figure(8)
-	plt.ion()
 
 	KE = []
 	EE = []
@@ -416,6 +414,7 @@ def main_i(T,nplot):
 				u0[i] = np.random.normal(0.0,np.sqrt(kBTi/m[i]))
 				v0[i] = np.random.normal(0.0,np.sqrt(kBTi/m[i]))
 				w0[i] = np.random.normal(0.0,np.sqrt(kBTi/m[i]))
+				scattermap[i] = plt.cm.viridis(1.0 - 2.0 * np.sqrt((u0[i]*u0[i]*m[i]*0.5))/np.max(np.sqrt(u0[i]*u0[i]*m[i]*0.5)))
 			#end if
 		#end for
 
@@ -427,6 +426,7 @@ def main_i(T,nplot):
 				u0[i] = np.random.normal(0.0,np.sqrt(kBTi/m[i]))
 				v0[i] = np.random.normal(0.0,np.sqrt(kBTi/m[i]))
 				w0[i] = np.random.normal(0.0,np.sqrt(kBTi/m[i]))
+				scattermap[i] = plt.cm.viridis(1.0 - 2.0 * np.sqrt((u0[i]*u0[i]*m[i]*0.5))/np.max(np.sqrt(u0*u0*m*0.5)))
 				active[i] = 1
 			#end if
 
@@ -436,6 +436,7 @@ def main_i(T,nplot):
 				u0[i] = np.random.normal(0.0,np.sqrt(kBTe/m[i]))
 				v0[i] = np.random.normal(0.0,np.sqrt(kBTe/m[i]))
 				w0[i] = np.random.normal(0.0,np.sqrt(kBTe/m[i]))
+				scattermap[i] = plt.cm.viridis(1.0 - 2.0 * np.sqrt((u0[i]*u0[i]*m[i]*0.5))/np.max(np.sqrt(u0*u0*m*0.5)))
 				active[i] = 1
 			#end if
 		#end for
@@ -540,15 +541,16 @@ def main_i(T,nplot):
 
 		#Plotting routine
 		if (t % nplot == 0):
+			#scattermap = plt.cm.viridis(1.0 - 2.0 * np.sqrt((u0*u0*m*0.5))/np.max(np.sqrt(u0*u0*m*0.5)))
 			plt.figure(1)
 			plt.clf()
 			plt.scatter(x0[N/2:],np.sign(u0[N/2:])*u0[N/2:]*u0[N/2:]*0.5*m[N/2:]/e,s=2.0,color=scattermap[N/2:])
 			plt.title('Ion Phase Space')
 			plt.axis([0.0, L, -100.0, 100.0])
-			plt.xlabel('x [m]')
-			plt.xticks(np.linspace(0.0,L,5))
-			plt.yticks(np.linspace(-100.0,100.0,6))
-			plt.ylabel('v [thermal]')
+			plt.xlabel('$x$ [$m$]')
+			plt.ylabel('$v$ [$v_{thermal}$]')
+			plt.xticks(np.linspace(0.0,L,2))
+			plt.yticks(np.linspace(-100.0,100.0,5))
 			plt.draw()
 			plt.savefig('plots/ps_i_'+str(t))
 			plt.pause(0.0001)
@@ -556,61 +558,46 @@ def main_i(T,nplot):
 			plt.figure(2)
 			plt.clf()
 			plt.plot(X,j0,linewidth=lw)
-			plt.title('J')
-			plt.xlabel('x [m]')
-			plt.xticks(np.linspace(0.0,L,5))
-			plt.ylabel('J [A/m2]')
+			plt.title('Current')
+			plt.xlabel('$x$ [$m$]')
+			plt.ylabel(r'$J$ [$\frac{A}{m^{2}}$]')
+			plt.xticks(np.linspace(0.0,L,2))
 			plt.draw()
 			plt.pause(0.0001)
 
 			plt.figure(3)
 			plt.clf()
 			plt.plot(X,E0,linewidth=lw)
-			plt.xlabel('x [m]')
-			plt.ylabel('E [V/m]')
+			plt.xlabel('$x$ [$m$]')
+			plt.ylabel(r'$E$ [$\frac{V}{m}$]')
+			plt.title('Electric Field')
+			plt.xticks(np.linspace(0.0,L,2))
+			plt.yticks([-1E6,0,1E6])
 			#plt.title('Electric Field, Implicit')
 			plt.draw()
 			plt.savefig('plots/e_'+str(t))
 			plt.pause(0.0001)
 
-			#plt.figure(4)
+			#plt.figure(5)
 			#plt.clf()
-			#plt.semilogy(TT,KE)
-			#plt.title('KE, Implicit')
-			#plt.draw()
-			#plt.pause(0.0001)
-
-			plt.figure(5)
-			plt.clf()
-			plt.semilogy(TT,EE/np.max(EE),linewidth=lw)
+			#plt.semilogy(TT,EE/np.max(EE),linewidth=lw)
 			#plt.semilogy(TT,np.min(EE)*np.exp(np.ones(np.size(TT))*growth_rate * TT))
-			plt.title('E2, Implicit')
-			plt.xlabel('t [s]')
-			plt.ylabel('E2 [A.U.]')
-			plt.draw()
-			plt.pause(0.0001)
-
-			#plt.figure(6)
-			#plt.clf()
-			#plt.plot(jbias)
+			#plt.title('E2, Implicit')
+			#plt.xlabel('t [s]')
+			#plt.ylabel('E2 [A.U.]')
+			#plt.xticks(np.linspace(0,np.max(TT)))
 			#plt.draw()
 			#plt.pause(0.0001)
 
-			#plt.figure(7)
-			#plt.clf()
-			#plt.hist(vionout)
-			#plt.draw()
-			#plt.pause(0.0001)
-
-			plt.figure(8)
+			plt.figure(4)
 			plt.clf()
 			plt.scatter(x0[:N/2],np.sign(u0[:N/2])*u0[:N/2]*u0[:N/2]*0.5*m[:N/2]/e,s=0.5,color=scattermap[:N/2])
 			plt.title('Electron Phase Space')
 			plt.axis([0.0, L, -100.0, 100.0])
-			plt.yticks(np.linspace(-100.0,100.0,6))
-			plt.xlabel('x [m]')
-			plt.xticks(np.linspace(0.0,L,5))
-			plt.ylabel('v [thermal]')
+			plt.yticks(np.linspace(-100.0,100.0,5))
+			plt.xlabel('$x$ [$m$]')
+			plt.ylabel('$v$ [$v_{thermal}$]')
+			plt.xticks(np.linspace(0.0,L,2))
 			plt.draw()
 			plt.savefig('plots/ps_e_'+str(t))
 			plt.pause(0.0001)

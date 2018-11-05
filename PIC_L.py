@@ -34,7 +34,7 @@ def interpolateField(F,x,dx):
 	wR = x % dx / dx
 	wL = 1.0 - wR
 	return wL * F[index] + wR * F[index+1]
-#end interpolateField
+#end interpolateFieldac
 
 def interpolateFieldPeriodic(F,x,Ng,dx):
 	index = int(np.floor(x/dx)) % (Ng+1)
@@ -366,36 +366,34 @@ def initialize(system,N,density,Kp,perturbation,dx,Ng,Te,L,X):
 #end def initialize
 
 def main_i(T,nplot):
-	tol = 1E-8
+	tol = 1E-6
 	maxiter = 20
 
 	#Bump on tail best parameters
-	system = 'bump-on-tail'
-	density = 1e10 # [1/m3]
-	perturbation = 0.01
-	Kp = 1
-	N = 100000
-	Ng = 40
-
-	dt = 1E-8 #[s]
-	dx = 0.1	 #[m]
-
-	Ti = 0.1 * 11600. #[K]
-	Te = 2.0 * 11600. #[K]
-
-	#Landau damping best params
-	#system = 'landau damping'
+	#system = 'bump-on-tail'
 	#density = 1e10 # [1/m3]
-	#perturbation = 0.05
-	#Kp = 2
+	#perturbation = 0.01
+	#Kp = 1
 	#N = 100000
-	#Ng = 100
+	#Ng = 40
 
-	#dt = 10E-8 #[s]
-	#dx = 0.04	 #[m]
+	#dt = 1E-8 #[s]
+	#dx = 0.1	 #[m]
 
 	#Ti = 0.1 * 11600. #[K]
-	#Te = 10.0 * 11600. #[K]
+	#Te = 2.0 * 11600. #[K]
+
+	#Landau damping best params
+	system = 'landau damping'
+	density = 1e10 # [1/m3]
+	perturbation = 0.05
+	Kp = 2
+	N = 40000
+	Ng = 100
+	dt = 1E-8 #[s]
+	dx = 0.04	 #[m]
+	Ti = 0.1 * 11600. #[K]
+	Te = 10.0 * 11600. #[K]
 
 	#Two-stream
 	#system = 'two-stream'
@@ -470,8 +468,6 @@ def main_i(T,nplot):
 	plt.ion()
 	plt.figure(5)
 	plt.ion()
-	plt.figure(6)
-	plt.ion()
 
 	KE = []
 	EE = []
@@ -537,8 +533,8 @@ def main_i(T,nplot):
 			plt.scatter(x0,v0/np.sqrt(kBTe/me),s=0.5,color=scattermap)
 			plt.title('Phase Space, Implicit')
 			plt.axis([0.0, L+dx, -10., 10.])
-			plt.xlabel('x [m]')
-			plt.ylabel('v [thermal]')
+			plt.xlabel('$x$ [$m$]')
+			plt.ylabel('$v$ [$v_{thermal}$]')
 			plt.xticks([0.0, L+dx])
 			plt.yticks([-10.0, -5.0, 0.0, 5.0, 10.0])
 			plt.draw()
@@ -550,8 +546,8 @@ def main_i(T,nplot):
 			plt.plot(X,j0,linewidth=lw)
 			plt.xticks([0.0, L+dx])
 			plt.title('Current, Implicit')
-			plt.xlabel('x [m]')
-			plt.ylabel('J [A/m2]')
+			plt.xlabel('$x$ [$m$]')
+			plt.ylabel(r'$J$ [$\frac{A}{m^{2}}$]')
 			plt.draw()
 			plt.pause(0.0001)
 
@@ -559,60 +555,92 @@ def main_i(T,nplot):
 			plt.clf()
 			plt.plot(X,E0,linewidth=lw)
 			plt.xticks([0.0, L+dx])
-			plt.xlabel('x [m]')
-			plt.ylabel('E [V/m]')
+			plt.xlabel('$x$ [$m$]')
+			plt.ylabel(r'$E$ [$\frac{V}{m}$]')
 			plt.title('Electric Field, Implicit')
 			plt.draw()
+			plt.savefig('plots/e_'+str(t))
 			plt.pause(0.0001)
 
 			plt.figure(4)
 			plt.clf()
-			plt.semilogy(TT,KE,linewidth=lw)
-			plt.xlabel('t [s]')
-			plt.ylabel('KE [J]')
+			plt.semilogy(np.array(TT)*wp,KE,linewidth=lw)
+			plt.xlabel(r't [$\omega_{p}^{-1}$]')
+			plt.ylabel('$KE$ [$J$]')
 			plt.title('KE, Implicit')
 			plt.draw()
 			plt.pause(0.0001)
 
 			plt.figure(5)
 			plt.clf()
-			plt.semilogy(TT,EE,linewidth=lw)
+			plt.semilogy(np.array(TT)*wp,EE,linewidth=lw)
 			if system == 'landau damping':
-				plt.semilogy(TT,np.max(EE)*np.exp(np.ones(np.size(TT))*growth_rate * TT),linewidth=lw)
+				plt.semilogy(np.array(TT)*wp,np.max(EE)*np.exp(np.ones(np.size(TT))*growth_rate * TT),linewidth=lw)
 			else:
-				plt.semilogy(TT,np.min(EE)*np.exp(np.ones(np.size(TT))*growth_rate * TT),linewidth=lw)
+				plt.semilogy(np.array(TT)*wp,np.min(EE)*np.exp(np.ones(np.size(TT))*growth_rate * TT),linewidth=lw)
 			plt.title('$E^{2}$, Implicit')
+			plt.ylabel(r'$E^{2}$ [$\frac{V^{2}}{m^{2}}$]')
+			plt.xlabel(r'$t$ [$\omega_{p}^{-1}$]')
+			plt.legend([r'$E^{2}$','Theoretical'])
 			plt.draw()
-			plt.savefig('plots/e_'+str(t))
-			plt.pause(0.0001)
-
-			plt.figure(6)
-			plt.clf()
-			plt.plot(jbias)
-			plt.draw()
+			plt.savefig('plots/e2_'+str(t))
 			plt.pause(0.0001)
 		#end if
 	#end for
-	np.savetxt('E2_I_m.txt',EE)
-	plt.figure(1)
-	plt.savefig('PS_I_m.png')
-	plt.figure(5)
-	plt.savefig('E2_I_m.png')
+	np.savetxt('plots/E2.txt',EE)
+	np.savetxt('plots/J.txt',j0)
+	output_file = open('plots/parameters.out','w+')
+	print('wp',wp,file=output_file)
+	print('Te',Te,file=output_file)
+	print('G',growth_rate,file=output_file)
+	print('tau',1.0/wp,file=output_file)
+	print('p2c',p2c,file=output_file)
+	print('dt',dt,file=output_file)
+	print('dx',dx,file=output_file)
+	print('Ng',Ng,file=output_file)
+	print('L',L+dx,file=output_file)
 #end main_i
 
 def main(T,nplot):
 	tol = 1E-8
-	maxiter = 50
+	maxiter = 20
 
-	T = stop
-	density = 1E12
-	perturbation = 0.01
-	Kp = 100
-	N = 40000
-	Ng = 20
+	#Bump on tail best parameters
+	#system = 'bump-on-tail'
+	#density = 1e10 # [1/m3]
+	#perturbation = 0.01
+	#Kp = 1
+	#N = 20000
+	#Ng = 40
 
-	dt = 1E-8
-	dx = 0.2
+	#dt = 1E-8 #[s]
+	#dx = 0.1	 #[m]
+	#Ti = 0.1 * 11600. #[K]
+	#Te = 2.0 * 11600. #[K]
+
+	#Landau damping best params
+	system = 'landau damping'
+	density = 1e10 # [1/m3]
+	perturbation = 0.05
+	Kp = 2
+	N = 100000
+	Ng = 200
+	dt = 1E-9 #[s]
+	dx = 0.02	 #[m]
+	Ti = 0.1 * 11600. #[K]
+	Te = 10.0 * 11600. #[K]
+
+	#Two-stream
+	#system = 'two-stream'
+	#density = 1e12 # [1/m3]
+	#perturbation = 0.01
+	#Kp = 2
+	#N = 40000
+	#Ng = 40
+	#dt = 5E-9 #[s]
+	#dx = 0.02	 #[m]
+	#Ti = 0.1 * 11600. #[K]
+	#Te = 2.0 * 11600. #[K]
 
 	L = dx * (Ng-1)
 	X = np.linspace(0.0,L+dx,Ng+1)
@@ -620,53 +648,21 @@ def main(T,nplot):
 	wp = np.sqrt(e**2 * density / epsilon0 / me)
 	invwp = 1./wp
 	K = Kp * np.pi / (L+dx)
-
-	print("wp : ",wp,"[1/s]")
-	print("dt : ",dt/invwp," [tau]")
-	print("tau: ",invwp,"[s]")
-	print("k  : ",K,"[1/m]")
-
 	p2c = (L+dx) * density / N
-	print("p2c :", p2c)
 
-	m = np.ones(N) * me
-	q =  -np.ones(N) * e
-
-	Ti = 0.1 * 11600. #[K]
-	Te = 2.0 * 11600. #[K]
-
-	kBTi = kb*Ti #[J]
-	kBTe = kb*Te #[J]
-
-	x0 = np.random.uniform(0., L+dx, N)
-
-	F = -np.cos(Kp * np.pi * X / (L+dx)) + 1.0
-	F = (N * perturbation) * F / np.sum(F)
-
-	j = N/2 - N * int(perturbation / 2)
-	for i in range(Ng):
-		for k in range(int(F[i])):
-			x0[j] = np.random.uniform(X[i],X[i+1])
-			j += 1
-		#end for
-	#end for
-
-	x0 = x0 % (L+dx)
-	#v = np.random.normal(0.0, np.sqrt(kBTe/me),N)
-	v0 = np.zeros(N)
-	# v[0:N/2] = np.random.normal(4.*np.sqrt(kBTe/me), np.sqrt(kBTe/me), N/2)
-	# v[N/2:N] = np.random.normal(-4.*np.sqrt(kBTe/me), np.sqrt(kBTe/me), N/2)
-
-	#v0[0:N/2] = -1.*np.sqrt(kBTe/me)
-	#v0[N/2:N] = 1.*np.sqrt(kBTe/me)
-
-	v0[0:N*5/10] = np.random.normal(0.0, np.sqrt(kBTe/me), N)
-	v0[N*5/10:] = np.random.normal(2.0 * np.sqrt(kBTe/me), 0.1 * np.sqrt(kBTe/me), N)
-	#Landau Damping case works perfectly now
-	#scattermap = plt.cm.viridis(np.sqrt(v0*v0)/np.max(np.sqrt(v0*v0)))
+	m,q,x0,v0,kBTe,growth_rate = initialize(system,N,density,Kp,perturbation,dx,Ng,Te,L,X)
 
 	x = x0
 	v = v0
+
+	print("wp : ",wp,"[1/s]")
+	print("dt : ",dt/invwp," [w * tau]")
+	print("tau: ",invwp,"[s]")
+	print("k  : ",K,"[1/m]")
+	print("p2c :", p2c)
+
+	scattermap = plt.cm.viridis(1.0 - 2.0*np.sqrt(v0*v0)/np.max(np.sqrt(v0*v0)))
+	#scattermap = plt.cm.viridis(v0/np.max(np.abs(v0)))
 
 	E = np.zeros(Ng+1)
 	phi = np.zeros(Ng+1)
@@ -683,8 +679,6 @@ def main(T,nplot):
 	plt.figure(4)
 	plt.ion()
 	plt.figure(5)
-	plt.ion()
-	plt.figure(6)
 	plt.ion()
 
 	EE = []
@@ -704,52 +698,64 @@ def main(T,nplot):
 		KE.append(np.sum(me * v*v / 2.))
 		TT.append(dt * t)
 
-		#Plotting Routine
-		if t % nplot ==0:
-			scattermap = plt.cm.viridis(np.sqrt(rho0*rho0)/np.max(np.sqrt(rho0*rho0)))
-
+		#Plotting routine
+		if (t % nplot == 0):
 			plt.figure(1)
 			plt.clf()
-			plt.scatter(x,v,s=0.5,color=scattermap)
+			plt.scatter(x0,v0/np.sqrt(kBTe/me),s=0.5,color=scattermap)
 			plt.title('Phase Space, Explicit')
-			plt.axis([0.0, L+dx, -np.sqrt(kBTe/me) * 8., np.sqrt(kBTe/me) * 8.])
+			plt.axis([0.0, L+dx, -10., 10.])
+			plt.xlabel('$x$ [$m$]')
+			plt.ylabel('$v$ [$v_{thermal}$]')
+			plt.xticks([0.0, L+dx])
+			plt.yticks([-10.0, -5.0, 0.0, 5.0, 10.0])
 			plt.draw()
+			plt.savefig('plots/ps_'+str(t))
 			plt.pause(0.0001)
 
 			plt.figure(2)
 			plt.clf()
-			plt.plot(X,weightCurrentsPeriodic(x,q,v,p2c,Ng,N,dx),linewidth=lw)
+			plt.plot(X,j,linewidth=lw)
+			plt.xticks([0.0, L+dx])
 			plt.title('Current, Explicit')
+			plt.xlabel('$x$ [$m$]')
+			plt.ylabel(r'$J$ [$\frac{A}{m^{2}}$]')
 			plt.draw()
 			plt.pause(0.0001)
 
 			plt.figure(3)
 			plt.clf()
 			plt.plot(X,E,linewidth=lw)
+			plt.xticks([0.0, L+dx])
+			plt.xlabel('$x$ [$m$]')
+			plt.ylabel(r'$E$ [$\frac{V}{m}$]')
 			plt.title('Electric Field, Explicit')
 			plt.draw()
-
+			plt.savefig('plots/e_'+str(t))
 			plt.pause(0.0001)
 
 			plt.figure(4)
 			plt.clf()
-			plt.plot(X,-rho/e,linewidth=lw)
-			plt.title('Density, Explicit')
+			plt.semilogy(np.array(TT)*wp,KE,linewidth=lw)
+			plt.xlabel(r't [$\omega_{p}^{-1}$]')
+			plt.ylabel('$KE$ [$J$]')
+			plt.title('KE, Explicit')
 			plt.draw()
 			plt.pause(0.0001)
 
 			plt.figure(5)
 			plt.clf()
-			plt.semilogy(TT,KE,linewidth=lw)
-			plt.title('KE, Explicit')
+			plt.semilogy(np.array(TT)*wp,EE,linewidth=lw)
+			if system == 'landau damping':
+				plt.semilogy(np.array(TT)*wp,np.max(EE)*np.exp(np.ones(np.size(TT))*growth_rate * TT),linewidth=lw)
+			else:
+				plt.semilogy(np.array(TT)*wp,np.min(EE)*np.exp(np.ones(np.size(TT))*growth_rate * TT),linewidth=lw)
+			plt.title('$E^{2}$, Explicit')
+			plt.ylabel(r'$E^{2}$ [$\frac{V^{2}}{m^{2}}$]')
+			plt.xlabel(r'$t$ [$\omega_{p}^{-1}$]')
+			plt.legend([r'$E^{2}$',r'$Theoretical$'],loc='lower left')
 			plt.draw()
-			plt.pause(0.0001)
-
-			plt.figure(6)
-			plt.clf()
-			plt.semilogy(TT,EE,linewidth=lw)
-			plt.title('E^2, Explicit')
-			plt.draw()
+			plt.savefig('plots/e2_'+str(t))
 			plt.pause(0.0001)
 		#end if
 
@@ -759,14 +765,24 @@ def main(T,nplot):
 		phi = phi - np.max(phi)
 		E = differentiateFieldPeriodic(phi,dx,Ng)
 		x,v = pushParticlesExplicit(x,v,q,m,N,Ng,dt,dx,E)
-		x,v = applyBoundaryConditionsPeriodic(x,v,m,N,L,dx,kBTi)
+		x,v = applyBoundaryConditionsPeriodic(x,v,m,N,L,dx,kBTe)
 	#end for
-	np.savetxt('E2_E_s.txt',EE)
+	np.savetxt('plots/E2.txt',EE)
+	np.savetxt('plots/J.txt',j)
+	output_file = open('plots/parameters.out','w+')
+	print('wp',wp,file=output_file)
+	print('Te',Te,file=output_file)
+	print('G',growth_rate,file=output_file)
+	print('tau',1.0/wp,file=output_file)
+	print('p2c',p2c,file=output_file)
+	print('dt',dt,file=output_file)
+	print('dx',dx,file=output_file)
+	print('Ng',Ng,file=output_file)
+	print('L',L+dx,file=output_file)
 	plt.figure(1)
-	plt.savefig('PS_E_s.png')
-	plt.figure(6)
-	plt.savefig('E2_E_s.png')
-
+	plt.savefig('plots/PS_I_m.png')
+	plt.figure(5)
+	plt.savefig('plots/E2_I_m.png')
 #end main
 
 if __name__ == '__main__':
