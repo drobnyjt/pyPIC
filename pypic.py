@@ -186,28 +186,28 @@ def implicit_pic(T, nplot):
 	maxiter = 20
 	np.random.seed(1)
 
-	#system = 'bump-on-tail'
-	#density = 1e10
-	#perturbation = 0.05
-	#Kp = 1
-	#N = 100000
-	#Ng = 40
-	#dt = 2e-8
-	#dx = 0.1
-	#Ti = 0.1 * 11600.
-	#Te = 10.0 * 11600.
+	system = 'bump-on-tail'
+	density = 1e10
+	perturbation = 0.05
+	Kp = 1
+	N = 40000
+	Ng = 40
+	dt = 2e-8
+	dx = 0.1
+	Ti = 0.1 * 11600.
+	Te = 8.0 * 11600.
 
 	#Landau damping best params
-	system = 'landau damping'
-	density = 1e10 # [1/m3]
-	perturbation = 0.05
-	Kp = 2
-	N = 100000
-	Ng = 100
-	dt = 5E-8 #[s]
-	dx = 0.04	 #[m]
-	Ti = 0.1 * 11600. #[K]
-	Te = 10.0 * 11600. #[K]
+	#system = 'landau damping'
+	#density = 1e10 # [1/m3]
+	#perturbation = 0.05
+	#Kp = 2
+	#N = 100000
+	#Ng = 100
+	#dt = 1E-8 #[s]
+	#dx = 0.04	 #[m]
+	#Ti = 0.1 * 11600. #[K]
+	#Te = 10.0 * 11600. #[K]
 
 	L = Ng * dx
 	print('L: ',L)
@@ -420,15 +420,15 @@ def explicit_pic(T, nplot):
 
 	#Landau damping best params
 	system = 'landau damping'
-	density = 1e11 # [1/m3]
-	perturbation = 0.025
+	density = 1e10 # [1/m3]
+	perturbation = 0.05
 	Kp = 2
-	N = 200000
-	Ng = 200
-	dt = 1e-7 #[s]
-	dx = 0.02	 #[m]
+	N = 100000
+	Ng = 100
+	dt = 1E-8 #[s]
+	dx = 0.04	 #[m]
 	Ti = 0.1 * 11600. #[K]
-	Te = 20.0 * 11600. #[K]
+	Te = 10.0 * 11600. #[K]
 
 	L = Ng * dx
 	print('L: ',L)
@@ -566,10 +566,10 @@ def explicit_pic(T, nplot):
 #end def explicit_pic
 
 if __name__ == '__main__':
-	#EE_e = explicit_pic(50,10)
+	#EE_e = explicit_pic(200,10)
 	EE_i = implicit_pic(200,10)
 	plt.figure(7)
-	plt.plot(EE_e)
+	#plt.plot(EE_e)
 	plt.plot(EE_i)
 	plt.savefig('test')
 	plt.show()
