@@ -8,6 +8,8 @@ import scipy as sp
 import scipy.sparse as spp
 import scipy.sparse.linalg as sppla
 
+from concurrent.futures import ThreadPoolExecutor as PoolExecutor
+
 mpl.rc('font',**{'family':'sans-serif','sans-serif':['Helvetica'], 'size' : 12})
 ## for Palatino and other serif fonts use:
 #rc('font',**{'family':'serif','serif':['Palatino']})
@@ -33,6 +35,22 @@ def interpolate_p(F, x, Ng, dx):
 	return w_L * F[index_L] + w_R * F[index_R]
 #end def interpolate_p
 
+def interpolate_p_2(F, x, Ng, N, dx):
+	F_interp = np.zeros(N)
+
+	index_L = np.floor(x/dx) % Ng
+	index_R = (index_L + 1) % Ng
+
+	w_R = (x % dx) / dx
+	w_L = 1. - w_R
+
+	for i in range(N):
+		F_interp[i] = F[int(index_L[i])] * w_L[i] + F[int(index_R[i])] * w_R[i]
+	#end for
+
+	return F_interp
+#end def_interpolate_p_2
+
 def weight_current_p(x, q, v, p2c, Ng, N, dx):
 	j = np.zeros(Ng)
 
@@ -44,11 +62,14 @@ def weight_current_p(x, q, v, p2c, Ng, N, dx):
 
 	idx = (1./dx)
 
+	j_i = q * v * p2c * idx
+
+	j_L = j_i * w_L
+	j_R = j_i * w_R
+
 	for i in range(N):
-		ind_L = int(index_L[i])
-		ind_R = int(index_R[i])
-		j[ind_L] += q[i] * v[i] * p2c * w_L[i] * idx
-		j[ind_R] += q[i] * v[i] * p2c * w_R[i] * idx
+		j[int(index_L[i])] += j_L[i]
+		j[int(index_R[i])] += j_R[i]
 	#end for
 
 	return j
@@ -151,6 +172,16 @@ def initialize_p(system, N, density, Kp, perturbation, dx, Ng, Te, L, X):
 		v0[plasma_proportion:] = np.random.normal(beam_drift * np.sqrt(kBTe/me), beam_temperature * np.sqrt(kBTe/me), beam_proportion+1)
 	#end if
 
+	if system=='two-stream':
+		beam_1_proportion = N*1/2
+		beam_2_proportion = N*1/2
+		beam_drift = 5.0
+		growth_rate = np.sqrt(3.)/2.*wp*(float(beam_1_proportion)/float(beam_2_proportion)/2.)**(1./3.)
+		v0 = np.zeros(N)
+		v0[0:beam_1_proportion] = np.random.normal(-beam_drift * np.sqrt(kBTe/me), np.sqrt(kBTe/me), beam_1_proportion)
+		v0[beam_1_proportion:] = np.random.normal(beam_drift * np.sqrt(kBTe/me), np.sqrt(kBTe/me), beam_2_proportion)
+	#end if
+
 	if system=='landau damping':
 		#d_landau = -np.sqrt(np.pi) * wp**4 / K**3 / np.sqrt(kBTe/me)**3 * np.exp(- wp**2 / K**2 / np.sqrt(kBTe/me)**2 * np.exp(-3./2.))
 
@@ -186,16 +217,27 @@ def implicit_pic(T, nplot):
 	maxiter = 20
 	np.random.seed(1)
 
-	system = 'bump-on-tail'
+	system = 'two-stream'
 	density = 1e10
 	perturbation = 0.05
 	Kp = 1
-	N = 40000
-	Ng = 40
-	dt = 2e-8
-	dx = 0.1
+	N = 100000
+	Ng = 100
+	dt = 3e-8
+	dx = 0.12
 	Ti = 0.1 * 11600.
-	Te = 8.0 * 11600.
+	Te = 2.0 * 11600.
+
+	#system = 'bump-on-tail'
+	#density = 1e10
+	#perturbation = 0.05
+	#Kp = 1
+	#N = 40000
+	#Ng = 40
+	#dt = 2e-8
+	#dx = 0.1
+	#i = 0.1 * 11600.
+	#Te = 8.0 * 11600.
 
 	#Landau damping best params
 	#system = 'landau damping'
@@ -233,7 +275,8 @@ def implicit_pic(T, nplot):
 	TT = []
 	j_bias = []
 
-	scattermap = plt.cm.viridis( 1.0 - 2.0 * np.sqrt(v0 * v0) / np.max( np.sqrt( v0*v0 ) ) )
+	#scattermap = plt.cm.viridis( 1.0 - 2.0 * np.sqrt(v0 * v0) / np.max( np.sqrt( v0*v0 ) ) )
+	scattermap = plt.cm.coolwarm(v0)
 	E0 = np.zeros(Ng)
 	Eh = np.zeros(Ng)
 	E1 = np.zeros(Ng)
@@ -272,9 +315,11 @@ def implicit_pic(T, nplot):
 		while(r>tol) & (k<maxiter):
 
 			#Particle Loop to find local E-field
-			for i in range(N):
-				E_interp[i] = interpolate_p(Eh, xh[i], Ng, dx)
+			#for i in range(N):
+			#	E_interp[i] = interpolate_p(Eh, xh[i], Ng, dx)
 			#end for i
+
+			E_interp = interpolate_p_2(Eh, xh, Ng, N, dx)
 
 			x1 = x0 + dt * v0 + dt * dt * (q/m) * E_interp*0.5
 			v1 = v0 + dt * (q/m) * E_interp
@@ -283,10 +328,12 @@ def implicit_pic(T, nplot):
 			vh = (v0 + v1) * 0.5
 
 			xh = xh % (L)
-			jh = weight_current_p(xh, q, vh, p2c, Ng, N, dx)
+			#jh = weight_current_p(xh, q, vh, p2c, Ng, N, dx)
 
 			x1 = x1 % (L)
 			j1 = weight_current_p(x1, q, v1, p2c, Ng, N, dx)
+
+			jh = (j1 + j0) * 0.5
 
 			E1 = E0 + (dt/epsilon0) * (np.average(jh) - jh)
 			Eh = (E1 + E0) * 0.5
@@ -315,9 +362,11 @@ def implicit_pic(T, nplot):
 
 		#Plotting routine
 		if (t % nplot == 0):
-			plt.figure(1)
+			fig = plt.figure(1)
 			plt.clf()
 			plt.scatter(x0,v0/np.sqrt(2.0*kBTe/me),s=0.5,color=scattermap)
+			ax = plt.gca()
+			#ax.set_facecolor('xkcd:dark blue')
 			plt.title('Phase Space, Implicit')
 			plt.axis([0.0, L, -10., 10.])
 			plt.xlabel('$x$ [$m$]')
@@ -423,8 +472,8 @@ def explicit_pic(T, nplot):
 	density = 1e10 # [1/m3]
 	perturbation = 0.05
 	Kp = 2
-	N = 100000
-	Ng = 100
+	N = 20000
+	Ng = 50
 	dt = 1E-8 #[s]
 	dx = 0.04	 #[m]
 	Ti = 0.1 * 11600. #[K]
@@ -567,7 +616,7 @@ def explicit_pic(T, nplot):
 
 if __name__ == '__main__':
 	#EE_e = explicit_pic(200,10)
-	EE_i = implicit_pic(200,10)
+	EE_i = implicit_pic(1000,10)
 	plt.figure(7)
 	#plt.plot(EE_e)
 	plt.plot(EE_i)
