@@ -7,6 +7,7 @@ import time
 import scipy as sp
 import scipy.sparse as spp
 import scipy.sparse.linalg as sppla
+import numba as nb
 
 from concurrent.futures import ThreadPoolExecutor as PoolExecutor
 
@@ -35,6 +36,7 @@ def interpolate_p(F, x, Ng, dx):
 	return w_L * F[index_L] + w_R * F[index_R]
 #end def interpolate_p
 
+@nb.jit('float64[:](float64[:],float64[:],int32,int32,float64)', nopython=True)
 def interpolate_p_2(F, x, Ng, N, dx):
 	F_interp = np.zeros(N)
 
@@ -51,6 +53,7 @@ def interpolate_p_2(F, x, Ng, N, dx):
 	return F_interp
 #end def_interpolate_p_2
 
+@nb.jit('float64[:](float64[:], float64[:], float64[:], int32, int32, int32, float64)',nopython=True)
 def weight_current_p(x, q, v, p2c, Ng, N, dx):
 	j = np.zeros(Ng)
 
@@ -75,6 +78,7 @@ def weight_current_p(x, q, v, p2c, Ng, N, dx):
 	return j
 #end def weight_current_p
 
+@nb.jit('float64[:](float64[:], float64[:], int32, int32, int32, float64)',nopython=True)
 def weight_density_p(x, q, p2c, Ng, N, dx):
 	rho = np.zeros(Ng)
 
@@ -96,6 +100,7 @@ def weight_density_p(x, q, p2c, Ng, N, dx):
 	return rho
 #end def weight_density_p
 
+@nb.jit('float64[:](float64[:], float64, int32)',nopython=True)
 def differentiate_p(F, dx, Ng):
 	dF = np.zeros(Ng)
 
@@ -107,6 +112,55 @@ def differentiate_p(F, dx, Ng):
 
 	return dF
 #end def differentiate_p
+
+@nb.jit(nb.types.UniTuple(nb.float64[:],4)(nb.float64[:],nb.float64[:],nb.float64[:],nb.float64[:],nb.float64[:],nb.float64[:],nb.int32,nb.int32,nb.int32,nb.float64,nb.float64,nb.float64,nb.float64,nb.int32))
+def particle_push_p(x0, v0, q, m, E0, j0, N, Ng, p2c, dx, dt, L, tol, maxiter):
+	#Initial guess from n-step levels
+	Es = E0
+	xs = x0
+
+	r = 1.0
+	k = 0
+
+	while(r>tol) & (k<maxiter):
+
+		#Particle Loop to find local E-field
+		#for i in range(N):
+		#	E_interp[i] = interpolate_p(Eh, xh[i], Ng, dx)
+		#end for i
+
+		q_m = q/m
+
+		E_interp = interpolate_p_2(Es, xs, Ng, N, dx)
+
+		x1 = x0 + dt * v0 + dt * dt * (q_m) * E_interp*0.5
+		v1 = v0 + dt * (q_m) * E_interp
+
+		xh = (x0 + x1) * 0.5
+		vh = (v0 + v1) * 0.5
+
+		xh = xh % (L)
+		#jh = weight_current_p(xh, q, vh, p2c, Ng, N, dx)
+
+		x1 = x1 % (L)
+		j1 = weight_current_p(x1, q, v1, p2c, Ng, N, dx)
+
+		jh = (j1 + j0) * 0.5
+
+		E1 = E0 + (dt/epsilon0) * (np.average(jh) - jh)
+		Eh = (E1 + E0) * 0.5
+
+		r = np.linalg.norm(Es-Eh)
+
+		Es = Eh
+		xs = xh
+
+		k += 1
+	#end while
+	print("Iterations: ",k)
+	print("Residual  : ",r)
+	return x1,v1,E1,j1
+#end def particle_push_p
 
 def differentiate_t(F, dt):
 	T = len(F)
@@ -149,13 +203,14 @@ def solve_poisson_p(dx, Ng, rho, phi0):
 	return phi
 #end def solve_poisson_p
 
-def initialize_p(system, N, density, Kp, perturbation, dx, Ng, Te, L, X):
+def initialize_p(system, N, density, Kp, perturbation, dx, Ng, Te, Ti, L, X):
 	wp = np.sqrt( e**2 * density / epsilon0 / me)
 	invwp = 1./wp
-	K = Kp * np.pi / (L)
+	K = Kp * 2.0 * np.pi / (L)
 	p2c = L * density / N
 	kBTe = kb*Te
-	v_thermal = np.sqrt(2.0 * kBTe / me)
+	kBTi = kb*Ti
+	v_thermal = np.sqrt(2.0 / 3.0 * kBTe / me)
 	LD = 7430.0 * np.sqrt( kBTe / e / density)
 
 	m = np.ones(N) * me
@@ -189,11 +244,9 @@ def initialize_p(system, N, density, Kp, perturbation, dx, Ng, Te, L, X):
 
 		#Assign velocity initial distribution function
 		v0 = np.zeros(N)
-		v0 = np.random.normal(0.0, np.sqrt(1.0*kBTe/me),N)
+		v0 = np.random.normal(0.0, np.sqrt(kBTe/me),N)
 		growth_rate = d_landau
 	#end if
-
-	#OTHER SYSTEMS
 
 	#perturbation
 	x0 = np.random.uniform(0.0, L, N)
@@ -209,7 +262,7 @@ def initialize_p(system, N, density, Kp, perturbation, dx, Ng, Te, L, X):
 
 	x0 = x0 % L
 
-	return m, q, x0, v0, kBTe, growth_rate, K, p2c, wp, invwp
+	return m, q, x0, v0, kBTe, kBTi, growth_rate, K, p2c, wp, invwp
 #end def initialize_p
 
 def implicit_pic(T, nplot):
@@ -217,16 +270,16 @@ def implicit_pic(T, nplot):
 	maxiter = 20
 	np.random.seed(1)
 
-	system = 'two-stream'
-	density = 1e10
-	perturbation = 0.05
-	Kp = 1
-	N = 100000
-	Ng = 100
-	dt = 3e-8
-	dx = 0.12
-	Ti = 0.1 * 11600.
-	Te = 2.0 * 11600.
+	#system = 'two-stream'
+	#density = 1e10
+	#perturbation = 0.05
+	#Kp = 2
+	#N = 100000
+	#Ng = 100
+	#dt = 3e-8
+	#dx = 0.12
+	#Ti = 0.1 * 11600.
+	#Te = 2.0 * 11600.
 
 	#system = 'bump-on-tail'
 	#density = 1e10
@@ -240,22 +293,22 @@ def implicit_pic(T, nplot):
 	#Te = 8.0 * 11600.
 
 	#Landau damping best params
-	#system = 'landau damping'
-	#density = 1e10 # [1/m3]
-	#perturbation = 0.05
-	#Kp = 2
-	#N = 100000
-	#Ng = 100
-	#dt = 1E-8 #[s]
-	#dx = 0.04	 #[m]
-	#Ti = 0.1 * 11600. #[K]
-	#Te = 10.0 * 11600. #[K]
+	system = 'landau damping'
+	density = 1e10 # [1/m3]
+	perturbation = 0.1
+	Kp = 2
+	N = 100000
+	Ng = 100
+	dt = 1E-8 #[s]
+	dx = 0.04	 #[m]
+	Ti = 0.1 * 11600. #[K]
+	Te = 10.0 * 11600. #[K]
 
 	L = Ng * dx
 	print('L: ',L)
 	X = np.linspace(0.0, L, Ng+1)
 
-	m, q, x0, v0, kBTe, growth_rate, K, p2c, wp, invwp = initialize_p(system, N, density, Kp, perturbation, dx, Ng, Te, L, X)
+	m, q, x0, v0, kBTe, kBTi, growth_rate, K, p2c, wp, invwp = initialize_p(system, N, density, Kp, perturbation, dx, Ng, Te, Ti, L, X)
 
 	print("wp : ",wp,"[1/s]")
 	print("dt : ",dt/invwp," [w * tau]")
@@ -275,8 +328,8 @@ def implicit_pic(T, nplot):
 	TT = []
 	j_bias = []
 
-	#scattermap = plt.cm.viridis( 1.0 - 2.0 * np.sqrt(v0 * v0) / np.max( np.sqrt( v0*v0 ) ) )
-	scattermap = plt.cm.coolwarm(v0)
+	scattermap = plt.cm.viridis( 1.0 - 2.0 * np.sqrt(v0 * v0) / np.max( np.sqrt( v0*v0 ) ) )
+	#scattermap = plt.cm.coolwarm(v0)
 	E0 = np.zeros(Ng)
 	Eh = np.zeros(Ng)
 	E1 = np.zeros(Ng)
@@ -308,45 +361,8 @@ def implicit_pic(T, nplot):
 
 	for t in range(T):
 		print('t: ',t)
-		#Initial guess from n-step levels
-		Es = E0
-		xs = x0
 
-		while(r>tol) & (k<maxiter):
-
-			#Particle Loop to find local E-field
-			#for i in range(N):
-			#	E_interp[i] = interpolate_p(Eh, xh[i], Ng, dx)
-			#end for i
-
-			E_interp = interpolate_p_2(Eh, xh, Ng, N, dx)
-
-			x1 = x0 + dt * v0 + dt * dt * (q/m) * E_interp*0.5
-			v1 = v0 + dt * (q/m) * E_interp
-
-			xh = (x0 + x1) * 0.5
-			vh = (v0 + v1) * 0.5
-
-			xh = xh % (L)
-			#jh = weight_current_p(xh, q, vh, p2c, Ng, N, dx)
-
-			x1 = x1 % (L)
-			j1 = weight_current_p(x1, q, v1, p2c, Ng, N, dx)
-
-			jh = (j1 + j0) * 0.5
-
-			E1 = E0 + (dt/epsilon0) * (np.average(jh) - jh)
-			Eh = (E1 + E0) * 0.5
-
-			r = np.linalg.norm(Es-Eh)
-
-			Es = Eh
-			xs = xh
-
-			k += 1
-		#end while
-		print("Iterations: ",k)
-		print("Residual  : ",r)
+		x1, v1, E1, j1 = particle_push_p(x0, v0, q, m, E0, j0, N, Ng, p2c, dx, dt, L, tol, maxiter)
 
 		E0 = E1
 		x0 = x1
@@ -415,7 +431,7 @@ def implicit_pic(T, nplot):
 				dEE_shift = dEE[1:]
 				dEE_trunc = dEE[:-1]
 				dEE_multi = dEE_shift * dEE_trunc
-
+				index_first_peak = 0
 				for s in range(len(dEE_multi)):
 					if dEE_multi[s] < 0.0 and dEE_trunc[s]>0.0:
 						index_first_peak = s + 1
@@ -451,7 +467,7 @@ def implicit_pic(T, nplot):
 	print('L',L+dx,file=output_file)
 
 	return EE
-#end def main_p
+#end def implicit_pic
 
 def explicit_pic(T, nplot):
 	np.random.seed(1)
@@ -476,8 +492,8 @@ def explicit_pic(T, nplot):
 	Ng = 50
 	dt = 1E-8 #[s]
 	dx = 0.04	 #[m]
-	Ti = 0.1 * 11600. #[K]
-	Te = 10.0 * 11600. #[K]
+	Ti = 1.0 * 11600. #[K]
+	Te = 1.0 * 11600. #[K]
 
 	L = Ng * dx
 	print('L: ',L)
