@@ -1,5 +1,5 @@
 from __future__ import print_function
-import PIC_L as p
+import pypic as p
 import convert as c
 import time
 import os
@@ -8,10 +8,10 @@ def main():
 	os.system('rm plots/*')
 
 	start = 0
-	stop  = 800
-	skip  = 5
+	stop  = 500
+	skip  = 100
 	start_time = time.time()
-	p.main_i(stop, skip)
+	p.implicit_pic(stop, skip)
 	stop_time = time.time()
 	time_out = open('plots/time.out','w+')
 	print(-start_time+stop_time,file=time_out)

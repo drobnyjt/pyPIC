@@ -53,6 +53,12 @@ def interpolate_p_2(F, x, Ng, N, dx):
 	return F_interp
 #end def_interpolate_p_2
 
+@nb.jit('float64[:](float64[:])')
+def smooth_field_p(F):
+	F_smooth = (np.roll(F,-1) + 2.0 * F + np.roll(F,1)) / 4.0
+	return F_smooth
+#end def smooth_field_p
+
 @nb.jit('float64[:](float64[:], float64[:], float64[:], int32, int32, int32, float64)',nopython=True)
 def weight_current_p(x, q, v, p2c, Ng, N, dx):
 	j = np.zeros(Ng)
@@ -140,14 +146,16 @@ def particle_push_p(x0, v0, q, m, E0, j0, N, Ng, p2c, dx, dt, L, tol, maxiter):
 		vh = (v0 + v1) * 0.5
 
 		xh = xh % (L)
-		#jh = weight_current_p(xh, q, vh, p2c, Ng, N, dx)
+		#jh = weight_current_p(xh, q, vh, p24c, Ng, N, dx)
 
 		x1 = x1 % (L)
 		j1 = weight_current_p(x1, q, v1, p2c, Ng, N, dx)
+		j1 = smooth_field_p(j1)
 
 		jh = (j1 + j0) * 0.5
 
 		E1 = E0 + (dt/epsilon0) * (np.average(jh) - jh)
+		E1 = smooth_field_p(E1)
 		Eh = (E1 + E0) * 0.5
 
 		r = np.linalg.norm(Es-Eh)
@@ -206,12 +214,14 @@ def solve_poisson_p(dx, Ng, rho, phi0):
 def initialize_p(system, N, density, Kp, perturbation, dx, Ng, Te, Ti, L, X):
 	wp = np.sqrt( e**2 * density / epsilon0 / me)
 	invwp = 1./wp
-	K = Kp * 2.0 * np.pi / (L)
+	K = Kp * 2.0 * np.pi / L
 	p2c = L * density / N
 	kBTe = kb*Te
 	kBTi = kb*Ti
-	v_thermal = np.sqrt(2.0 / 3.0 * kBTe / me)
-	LD = 7430.0 * np.sqrt( kBTe / e / density)
+	v_thermal = np.sqrt(kBTe / me)
+	#print(v_thermal / 6.5E6)
+
+	LD = np.sqrt(kBTe * epsilon0 / e / e / density)
 
 	m = np.ones(N) * me
 	q = -np.ones(N) * e
@@ -220,7 +230,7 @@ def initialize_p(system, N, density, Kp, perturbation, dx, Ng, Te, Ti, L, X):
 		beam_proportion = N*2/6
 		plasma_proportion = N*4/6
 		beam_temperature = 1./20.
-		beam_drift = 5.0
+		beam_drift = 6.0
 		growth_rate = np.sqrt(3.)/2.*wp*(float(beam_proportion)/float(plasma_proportion)/2.)**(1./3.)
 		v0 = np.zeros(N)
 		v0[0:plasma_proportion] = np.random.normal(0.0, np.sqrt(kBTe/me), plasma_proportion)
@@ -237,20 +247,26 @@ def initialize_p(system, N, density, Kp, perturbation, dx, Ng, Te, Ti, L, X):
 		v0[beam_1_proportion:] = np.random.normal(beam_drift * np.sqrt(kBTe/me), np.sqrt(kBTe/me), beam_2_proportion)
 	#end if
 
+
 	if system=='landau damping':
 		#d_landau = -np.sqrt(np.pi) * wp**4 / K**3 / np.sqrt(kBTe/me)**3 * np.exp(- wp**2 / K**2 / np.sqrt(kBTe/me)**2 * np.exp(-3./2.))
-
-		d_landau = -np.sqrt(np.pi) * wp * (wp / K / v_thermal)**3 * np.exp( -wp**2/K**2/v_thermal**2)*np.exp(-3./2.)
-
+		#print(d_landau)
+		d_landau = -np.sqrt(np.pi) * wp * (wp/K/v_thermal)**3 * np.exp(-1./(2.0 * K**2 * LD**2) - 3./2.)
+		#d_landau = -np.sqrt(np.pi) * wp * (wp/K/v_thermal)**3 * np.exp(-1./(2.0 * K**2 * LD**2) - 3./2.)
+		#print(d_landau)
+		#le = v_thermal / wp
+		#d_landau = -np.sqrt(np.pi / 8.) * wp / (K * le)**3 * np.exp( -1./2.0/(K * le)**2 - 3./2.)
+		#print(d_landau)
+		#exit()
 		#Assign velocity initial distribution function
 		v0 = np.zeros(N)
-		v0 = np.random.normal(0.0, np.sqrt(kBTe/me),N)
+		v0 = np.random.normal(0.0, v_thermal ,N)
 		growth_rate = d_landau
 	#end if
 
 	#perturbation
 	x0 = np.random.uniform(0.0, L, N)
-	F = -np.cos(Kp * np.pi * X / L) + 1.0
+	F = 1.0 + np.cos(K * X)
 	F = ( N * perturbation ) * F / np.sum(F)
 	j = N/2 - int(N*perturbation / 2)
 	for i in range(Ng):
@@ -261,60 +277,62 @@ def initialize_p(system, N, density, Kp, perturbation, dx, Ng, Te, Ti, L, X):
 	#end for i
 
 	x0 = x0 % L
-
-	return m, q, x0, v0, kBTe, kBTi, growth_rate, K, p2c, wp, invwp
+	return m, q, x0, v0, kBTe, kBTi, growth_rate, K, p2c, wp, invwp, LD
 #end def initialize_p
 
 def implicit_pic(T, nplot):
 	tol = 1e-8
-	maxiter = 20
-	np.random.seed(1)
+	maxiter = 100
+	np.random.seed(2)
 
 	#system = 'two-stream'
-	#density = 1e10
-	#perturbation = 0.05
-	#Kp = 2
+	#density = 1e15
+	#perturbation = 0.1
+	#Kp = 1
 	#N = 100000
 	#Ng = 100
-	#dt = 3e-8
-	#dx = 0.12
+	#dt = 5e-11
 	#Ti = 0.1 * 11600.
-	#Te = 2.0 * 11600.
+	#Te = 0.1 * 11600.
+	#L = 40.0 * np.sqrt(kb*Te * epsilon0/e/e/density)
 
 	#system = 'bump-on-tail'
-	#density = 1e10
-	#perturbation = 0.05
+	#density = 1e15
+	#perturbation = 0.1
 	#Kp = 1
-	#N = 40000
+	#N = 100000
 	#Ng = 40
-	#dt = 2e-8
-	#dx = 0.1
-	#i = 0.1 * 11600.
-	#Te = 8.0 * 11600.
+	#dt = 1e-11
+	#Ti = 0.1 * 11600.
+	#Te = 0.1 * 11600.
+	#L = 20.0 * np.sqrt(kb*Te * epsilon0/e/e/density)
 
 	#Landau damping best params
 	system = 'landau damping'
 	density = 1e10 # [1/m3]
-	perturbation = 0.1
-	Kp = 2
+	perturbation = 0.05
+	Kp = 1
 	N = 100000
 	Ng = 100
 	dt = 1E-8 #[s]
-	dx = 0.04	 #[m]
 	Ti = 0.1 * 11600. #[K]
-	Te = 10.0 * 11600. #[K]
+	Te = 1.0 * 11600. #[K]
+	L = 20.0 *  np.sqrt(kb*Te * epsilon0 / e / e / density)
 
-	L = Ng * dx
+
+	dx = L / float(Ng)
+
 	print('L: ',L)
 	X = np.linspace(0.0, L, Ng+1)
 
-	m, q, x0, v0, kBTe, kBTi, growth_rate, K, p2c, wp, invwp = initialize_p(system, N, density, Kp, perturbation, dx, Ng, Te, Ti, L, X)
+	m, q, x0, v0, kBTe, kBTi, growth_rate, K, p2c, wp, invwp, LD = initialize_p(system, N, density, Kp, perturbation, dx, Ng, Te, Ti, L, X)
 
 	print("wp : ",wp,"[1/s]")
-	print("dt : ",dt/invwp," [w * tau]")
+	print("dt : ",dt/invwp," [dt * wp]")
 	print("tau: ",invwp,"[s]")
-	print("k  : ",K,"[1/m]")
+	print("k*LD: ",K*LD)
 	print("p2c :", p2c)
+	print("gamma: ",growth_rate)
 
 	#Initialize figures
 	num_figs = 5
@@ -329,7 +347,7 @@ def implicit_pic(T, nplot):
 	j_bias = []
 
 	scattermap = plt.cm.viridis( 1.0 - 2.0 * np.sqrt(v0 * v0) / np.max( np.sqrt( v0*v0 ) ) )
-	#scattermap = plt.cm.coolwarm(v0)
+	#scattermap = plt.cm.coolwarm((v0 + 0.5*np.max(v0))/np.max(v0))
 	E0 = np.zeros(Ng)
 	Eh = np.zeros(Ng)
 	E1 = np.zeros(Ng)
@@ -380,7 +398,8 @@ def implicit_pic(T, nplot):
 		if (t % nplot == 0):
 			fig = plt.figure(1)
 			plt.clf()
-			plt.scatter(x0,v0/np.sqrt(2.0*kBTe/me),s=0.5,color=scattermap)
+			plt.scatter(x0,v0/np.sqrt(1.5*kBTe/me),s=2.0,color=scattermap)
+			#plt.scatter(x0[0::N/100000],v0[0::N/100000]/np.sqrt(2.0*kBTe/me),s=1.0,color=scattermap[0::N/100000])
 			ax = plt.gca()
 			#ax.set_facecolor('xkcd:dark blue')
 			plt.title('Phase Space, Implicit')
