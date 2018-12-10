@@ -55,17 +55,15 @@ def weightCurrents(x,q,v,p2c,Ng,N,dx,dt,active):
 		elif active[i] == -1:
 			pass
 			#j[0] += q[i] * v[i] * p2c * idx
-			j[0] += -q[i] * p2c / dt
+			j[0]  +=  dx * q[i] * p2c / dt
 		elif active[i] == 0:
 			pass
 			#j[-1] +=  q[i] * v[i] * p2c * idx
-			j[-1] += q[i] * p2c / dt
-
-		#j[0] = 0.0
-		#j[-1] = 0.0
+			j[-1] += -dx * q[i] * p2c / dt
 		#end if
 	#end for
-
+	j[0] += j[1]
+	j[-1] += j[-2]
 	return j
 #end def weightCurrents
 
@@ -208,11 +206,19 @@ def integrateField(F,dx,Ng):
 	IF = np.zeros(Ng)
 
 	for i in range(0,Ng):
-		IF[i] = -np.sum(F[:i+1]) * dx
+		#IF[i] = -np.sum(F[:i+1]) * dx
+		IF[i] = -np.trapz(F[:i+1],dx=dx)
 	#end for
 
 	return IF
 #end def integrateField
+
+def smoothField(F):
+	F_smooth = (np.roll(F,-1) + 2.0 * F + np.roll(F,1)) / 4.0
+	F_smooth[0] = F[0]
+	F_smooth[-1] = F[-1]
+	return F_smooth
+#end def smooth_field_p
 
 def initialize(system,N,density,Kp,perturbation,dx,Ng,Te,Ti,L,X):
 	wp = np.sqrt(e**2 * density / epsilon0 / me)
@@ -340,6 +346,7 @@ def main_i(T,nplot):
 	print("tau: ",invwp,"[s]")
 	print("k  : ",K,"[1/m]")
 	print("p2c :", p2c)
+	print("floating potential: ", (kb*Te / e) * (0.5) * np.log(mp / 2.0 / np.pi / me) )
 
 	scattermap = plt.cm.viridis(1.0 - 2.0 * np.sqrt((u0*u0*m*0.5))/np.max(np.sqrt(u0*u0*m*0.5)))
 	#scattermap = plt.cm.viridis()
@@ -394,8 +401,8 @@ def main_i(T,nplot):
 	#plt.ion()
 	plt.figure(4)
 	plt.ion()
-	#plt.figure(6)
-	#plt.ion()
+	plt.figure(6)
+	plt.ion()
 	#plt.figure(7)
 	#plt.ion()
 
@@ -407,6 +414,7 @@ def main_i(T,nplot):
 
 	for t in range(T+1):
 		print('t: ',t)
+		print('kBTe: ',np.std(u0)**2 * me / e)
 
 		#Thermostat
 		for i in range(N):
@@ -499,11 +507,14 @@ def main_i(T,nplot):
 			#Update field quantities in time
 			#xh = xh % (L+dx)
 			jh = weightCurrents(xh, q, uh, p2c, Ng, N, dx, dt, active)
+			#jh = smoothField(jh)
 
 			#x1 = x1 % (L+dx)
 			j1 = weightCurrents(x1, q, u1, p2c, Ng, N, dx, dt, active)
+			#j1 = smoothField(j1)
 
 			E1 = E0 + (dt/epsilon0) * (np.average(jh) - jh)
+			#E1 = smoothField(E1)
 			phi1 = integrateField(E1,dx,Ng)
 			phi1 = phi1 - np.max(phi1)
 
@@ -534,7 +545,7 @@ def main_i(T,nplot):
 		r = 1.0
 
 		#Update time-tracked values
-		EE.append(np.sum(epsilon0 * E0*E0 / 2.))
+		EE.append(np.sum(epsilon0 * E0*E0 * dx/ 2.))
 		KE.append(np.sum(me * u0*u0 / 2.))
 		TT.append(t * dt)
 		jbias.append(np.average(j0))
@@ -561,6 +572,16 @@ def main_i(T,nplot):
 			plt.title('Current')
 			plt.xlabel('$x$ [$m$]')
 			plt.ylabel(r'$J$ [$\frac{A}{m^{2}}$]')
+			plt.xticks(np.linspace(0.0,L,2))
+			plt.draw()
+			plt.pause(0.0001)
+
+			plt.figure(6)
+			plt.clf()
+			plt.plot(X,phih,linewidth=lw)
+			plt.title('potential')
+			plt.xlabel('$x$ [$m$]')
+			plt.ylabel(r'$\phi$')
 			plt.xticks(np.linspace(0.0,L,2))
 			plt.draw()
 			plt.pause(0.0001)

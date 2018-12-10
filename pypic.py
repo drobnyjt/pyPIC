@@ -137,7 +137,7 @@ def particle_push_p(x0, v0, q, m, E0, j0, N, Ng, p2c, dx, dt, L, tol, maxiter):
 
 		q_m = q/m
 
-		E_interp = interpolate_p_2(Es, xs, Ng, N, dx)
+		E_interp = interpolate_p_2(smooth_field_p(Es), xs, Ng, N, dx)
 
 		x1 = x0 + dt * v0 + dt * dt * (q_m) * E_interp*0.5
 		v1 = v0 + dt * (q_m) * E_interp
@@ -146,16 +146,17 @@ def particle_push_p(x0, v0, q, m, E0, j0, N, Ng, p2c, dx, dt, L, tol, maxiter):
 		vh = (v0 + v1) * 0.5
 
 		xh = xh % (L)
-		#jh = weight_current_p(xh, q, vh, p24c, Ng, N, dx)
+		jh = weight_current_p(xh, q, vh, p2c, Ng, N, dx)
+		#jh = smooth_field_p(jh)
 
 		x1 = x1 % (L)
 		j1 = weight_current_p(x1, q, v1, p2c, Ng, N, dx)
-		j1 = smooth_field_p(j1)
+		#j1 = smooth_field_p(j1)
 
-		jh = (j1 + j0) * 0.5
+		#jh = (j1 + j0) * 0.5
 
-		E1 = E0 + (dt/epsilon0) * (np.average(jh) - jh)
-		E1 = smooth_field_p(E1)
+		E1 = E0 + (dt/epsilon0) * (np.average(jh) - smooth_field_p(jh))
+		#E1 = smooth_field_p(E1)
 		Eh = (E1 + E0) * 0.5
 
 		r = np.linalg.norm(Es-Eh)
@@ -240,11 +241,12 @@ def initialize_p(system, N, density, Kp, perturbation, dx, Ng, Te, Ti, L, X):
 	if system=='two-stream':
 		beam_1_proportion = N*1/2
 		beam_2_proportion = N*1/2
-		beam_drift = 5.0
+		beam_temperature = 1./2.
+		beam_drift = 2.0
 		growth_rate = np.sqrt(3.)/2.*wp*(float(beam_1_proportion)/float(beam_2_proportion)/2.)**(1./3.)
 		v0 = np.zeros(N)
-		v0[0:beam_1_proportion] = np.random.normal(-beam_drift * np.sqrt(kBTe/me), np.sqrt(kBTe/me), beam_1_proportion)
-		v0[beam_1_proportion:] = np.random.normal(beam_drift * np.sqrt(kBTe/me), np.sqrt(kBTe/me), beam_2_proportion)
+		v0[0:beam_1_proportion] = np.random.normal(-beam_drift * np.sqrt(kBTe/me), beam_temperature * np.sqrt(kBTe/me), beam_1_proportion)
+		v0[beam_1_proportion:] = np.random.normal(beam_drift * np.sqrt(kBTe/me), beam_temperature * np.sqrt(kBTe/me), beam_2_proportion)
 	#end if
 
 
@@ -285,40 +287,40 @@ def implicit_pic(T, nplot):
 	maxiter = 100
 	np.random.seed(2)
 
-	#system = 'two-stream'
-	#density = 1e15
-	#perturbation = 0.1
-	#Kp = 1
-	#N = 100000
-	#Ng = 100
-	#dt = 5e-11
-	#Ti = 0.1 * 11600.
-	#Te = 0.1 * 11600.
-	#L = 40.0 * np.sqrt(kb*Te * epsilon0/e/e/density)
-
-	#system = 'bump-on-tail'
-	#density = 1e15
-	#perturbation = 0.1
-	#Kp = 1
-	#N = 100000
-	#Ng = 40
-	#dt = 1e-11
-	#Ti = 0.1 * 11600.
-	#Te = 0.1 * 11600.
-	#L = 20.0 * np.sqrt(kb*Te * epsilon0/e/e/density)
-
-	#Landau damping best params
-	system = 'landau damping'
-	density = 1e10 # [1/m3]
+	system = 'two-stream'
+	density = 1e10
 	perturbation = 0.05
 	Kp = 1
 	N = 100000
 	Ng = 100
-	dt = 1E-8 #[s]
-	Ti = 0.1 * 11600. #[K]
-	Te = 1.0 * 11600. #[K]
-	L = 20.0 *  np.sqrt(kb*Te * epsilon0 / e / e / density)
+	dt = 1e-8
+	Ti = 0.1 * 11600.
+	Te = 0.1 * 11600.
+	L = 15.0 * np.sqrt(kb*Te * epsilon0/e/e/density)
+	#L = np.sqrt(3.) * np.sqrt( e**2 * density / epsilon0 / me) / 2. / np.sqrt(kb*Te/me) / 2.
 
+	#system = 'bump-on-tail'
+	#density = 1e5
+	#perturbation = 0.5
+	#Kp = 1
+	#N = 100000
+	#Ng = 50
+	#dt = 5e-6
+	#Ti = 0.1 * 11600.
+	#Te = 0.1 * 11600.
+	#L = 30.0 * np.sqrt(kb*Te * epsilon0/e/e/density)
+
+	#Landau damping best params
+	#system = 'landau damping'
+	#density = 1e10 # [1/m3]
+	#perturbation = 0.1
+	#Kp = 1
+	#N = 100000
+	#Ng = 100
+	#dt = 1E-8 #[s]
+	#Ti = 0.1 * 11600. #[K]
+	#Te = 1.0 * 11600. #[K]
+	#L = 20.0 *  np.sqrt(kb*Te * epsilon0 / e / e / density
 
 	dx = L / float(Ng)
 
@@ -346,8 +348,8 @@ def implicit_pic(T, nplot):
 	TT = []
 	j_bias = []
 
-	scattermap = plt.cm.viridis( 1.0 - 2.0 * np.sqrt(v0 * v0) / np.max( np.sqrt( v0*v0 ) ) )
-	#scattermap = plt.cm.coolwarm((v0 + 0.5*np.max(v0))/np.max(v0))
+	#scattermap = plt.cm.viridis( 1.0 - 2.0 * np.sqrt(v0 * v0) / np.max( np.sqrt( v0*v0 ) ) )
+	scattermap = plt.cm.coolwarm((v0 + 0.5*np.max(v0))/np.max(v0))
 	E0 = np.zeros(Ng)
 	Eh = np.zeros(Ng)
 	E1 = np.zeros(Ng)
@@ -389,8 +391,9 @@ def implicit_pic(T, nplot):
 		k = 0
 		r = 1.0
 
-		EE.append(np.sum(epsilon0 * E0*E0 / 2.))
-		KE.append(np.sum(me * v0*v0 / 2.))
+		EE.append(np.sum(epsilon0 * E0*E0 * dx / 2.))
+		KE.append(p2c * np.sum(me * v0*v0 / 2.))
+		print("Total Energy: ", np.sum(epsilon0 * E0*E0 * dx / 2.) + p2c * np.sum(me * v0*v0 / 2.))
 		TT.append(t * dt)
 		j_bias.append(np.average(j0))
 
@@ -403,11 +406,11 @@ def implicit_pic(T, nplot):
 			ax = plt.gca()
 			#ax.set_facecolor('xkcd:dark blue')
 			plt.title('Phase Space, Implicit')
-			plt.axis([0.0, L, -10., 10.])
+			plt.axis([0.0, L, -5., 5.])
 			plt.xlabel('$x$ [$m$]')
 			plt.ylabel('$v$ [$v_{thermal}$]')
 			plt.xticks([0.0, L])
-			plt.yticks([-10.0, -5.0, 0.0, 5.0, 10.0])
+			plt.yticks([-5.0, -3.0, 0.0, 3.0, 5.0])
 			plt.draw()
 			plt.savefig('plots/ps_'+str(t))
 			plt.pause(0.0001)
@@ -503,16 +506,16 @@ def explicit_pic(T, nplot):
 	#Te = 10.0 * 11600.
 
 	#Landau damping best params
-	system = 'landau damping'
-	density = 1e10 # [1/m3]
-	perturbation = 0.05
-	Kp = 2
-	N = 20000
-	Ng = 50
-	dt = 1E-8 #[s]
-	dx = 0.04	 #[m]
-	Ti = 1.0 * 11600. #[K]
-	Te = 1.0 * 11600. #[K]
+	#system = 'landau damping'
+	#density = 1e10 # [1/m3]
+	#perturbation = 0.05
+	#Kp = 2
+	#N = 100000
+	#Ng = 100
+	#dt = 1E-8 #[s]
+	#dx = 0.04	 #[m]
+	#Ti = 1.0 * 11600. #[K]
+	#Te = 1.0 * 11600. #[K]
 
 	L = Ng * dx
 	print('L: ',L)
@@ -578,11 +581,11 @@ def explicit_pic(T, nplot):
 			plt.clf()
 			plt.scatter(x,v/np.sqrt(2.0*kBTe/me),s=0.5,color=scattermap)
 			plt.title('Phase Space, Implicit')
-			plt.axis([0.0, L, -10., 10.])
+			plt.axis([0.0, L, -5., 5.])
 			plt.xlabel('$x$ [$m$]')
 			plt.ylabel('$v$ [$v_{thermal}$]')
 			plt.xticks([0.0, L])
-			plt.yticks([-10.0, -5.0, 0.0, 5.0, 10.0])
+			plt.yticks([-5.0, -2.0, 0.0, 2.0, 5.0])
 			plt.draw()
 			plt.savefig('plots/ps_'+str(t))
 			plt.pause(0.0001)
