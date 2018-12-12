@@ -8,8 +8,8 @@ def main():
 	os.system('rm plots/*')
 
 	start = 0
-	stop  = 500
-	skip  = 100
+	stop  = 1000
+	skip  = 5
 	start_time = time.time()
 	p.implicit_pic(stop, skip)
 	stop_time = time.time()
@@ -18,6 +18,7 @@ def main():
 	#c.convert('plots','ps_i',start,stop,skip,'mov_i.gif')
 	c.convert('plots','ps',start,stop,skip,'plots/mov.gif')
 	c.convert('plots','e',start,stop,skip,'plots/mov_f.gif')
+	c.convert('plots','summary',start,stop,skip,'plots/mov_all.gif')
 #end def main
 
 if __name__ == '__main__':

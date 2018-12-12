@@ -12,5 +12,5 @@ def convert(directory, filename,start,stop,skip,outname):
 #end def convert
 
 if __name__ == '__main__':
-	convert('plots','ps',0,1000,10,'movie.gif')
+	convert('plots','summary',0,1000,10,'movie_all.gif')
 #end if
