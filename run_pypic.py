@@ -8,10 +8,10 @@ def main():
 	os.system('rm plots/*')
 
 	start = 0
-	stop  = 1000
-	skip  = 5
+	stop  = 10000
+	skip  = 10
 	start_time = time.time()
-	p.implicit_pic(stop, skip)
+	p.main(stop,skip)
 	stop_time = time.time()
 	time_out = open('plots/time.out','w+')
 	print(-start_time+stop_time,file=time_out)

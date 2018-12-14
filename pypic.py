@@ -4,6 +4,7 @@ import scipy.linalg as la
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import time
+import math
 import scipy as sp
 import scipy.ndimage as nd
 import scipy.sparse as spp
@@ -29,14 +30,15 @@ mp = 1.67E-27
 me = 9.11E-31
 kb = 1.38E-23
 
-@nb.jit('float64[:](float64[:],float64[:],int32,int32,float64)', nopython=True)
+@nb.jit('float64[:](float64[:],float64[:],int32,int32,float64)', nopython=True,nogil=True)
 def interpolate_p(F, x, Ng, N, dx):
     F_interp = np.zeros(N)
+    idx = (1./dx)
 
-    index_L = np.floor(x/dx) % Ng
+    index_L = x/dx #% Ng
     index_R = (index_L + 1) % Ng
 
-    w_R = (x % dx) / dx
+    w_R = (x % dx) * idx
     w_L = 1. - w_R
 
     for i in range(N):
@@ -52,17 +54,16 @@ def smooth_field_p(F):
     return F_smooth
 #end def smooth_field_p
 
-@nb.jit('float64[:](float64[:], float64[:], float64[:], int32, int32, int32, float64)',nopython=True)
+@nb.jit('float64[:](float64[:], float64[:], float64[:], int32, int32, int32, float64)',nogil=True,nopython=True)
 def weight_current_p(x, q, v, p2c, Ng, N, dx):
     j = np.zeros(Ng)
+    idx = (1./dx)
 
-    index_L = np.floor(x/dx) % Ng
+    index_L = x/dx# % Ng
     index_R = (index_L + 1) % Ng
 
-    w_R = (x % dx) / dx
+    w_R = (x % dx) * idx
     w_L = 1. - w_R
-
-    idx = (1./dx)
 
     j_i = q * v * p2c * idx
 
@@ -77,11 +78,11 @@ def weight_current_p(x, q, v, p2c, Ng, N, dx):
     return j
 #end def weight_current_p
 
-@nb.jit(nb.types.UniTuple(nb.float64[:],4)(nb.float64[:],nb.float64[:],nb.int32,nb.int32,nb.int32,nb.float64,nb.float64))
-def weight_phase_space_density_p(x, v, Ng, Nv, N, dx, dv):
+@nb.jit(nb.types.UniTuple(nb.float64[:],4)(nb.float64[:],nb.float64[:],nb.int32,nb.int32,nb.int32,nb.float64,nb.float64,nb.float64))
+def weight_phase_space_density_p(x, v, Ng, Nv, N, dx, dv, Vmax):
     d = np.zeros((Ng,Nv))
     X = np.linspace(0.0, Ng*dx, Ng)
-    V = np.linspace(-5.0, 5.0, Nv)
+    V = np.linspace(-Vmax, Vmax, Nv)
 
     index_v_S = np.floor(v/dv)
     index_v_S = index_v_S - np.min(index_v_S)
@@ -107,11 +108,11 @@ def weight_phase_space_density_p(x, v, Ng, Nv, N, dx, dv):
     return X,V,d
 #end def weight_phase_space_density_p
 
-@nb.jit('float64[:](float64[:], float64[:], int32, int32, int32, float64)',nopython=True)
+@nb.jit('float64[:](float64[:], float64[:], int32, int32, int32, float64)',nopython=True,nogil=True)
 def weight_density_p(x, q, p2c, Ng, N, dx):
     rho = np.zeros(Ng)
 
-    index_L = np.floor(x/dx) % Ng
+    index_L = x/dx# % Ng
     index_R = (index_L + 1) % Ng
 
     w_R = (x % dx) / dx
@@ -119,30 +120,34 @@ def weight_density_p(x, q, p2c, Ng, N, dx):
 
     idx = (1./dx)
 
+    q_i = q * p2c * idx
+
+    q_L = q_i * w_L
+    q_R = q_i * w_R
+
     for i in range(N):
-        ind_L = int(index_L[i])
-        ind_R = int(index_R[i])
-        rho[ind_L] += q[i] * p2c * w_L[i] * idx
-        rho[ind_R] += q[i] * p2c * w_R[i] * idx
+        rho[int(index_L[i])] += q_L[i]
+        rho[int(index_R[i])] += q_R[i]
     #end for
 
     return rho
 #end def weight_density_p
 
-@nb.jit('float64[:](float64[:], float64, int32)',nopython=True)
+@nb.jit('float64[:](float64[:], float64, int32)',nopython=True,nogil=True)
 def differentiate_p(F, dx, Ng):
     dF = np.zeros(Ng)
+    idx = (1./dx)
 
     for i in range(Ng):
-        ind_L = (i-1) % Ng
+        ind_L = (i-1)# % Ng
         ind_R = (i+1) % Ng
-        dF[i] = (F[ind_R] - F[ind_L]) / dx * 0.5
+        dF[i] = (F[ind_R] - F[ind_L]) * idx * 0.5
     #end for
 
     return dF
 #end def differentiate_p
 
-@nb.jit(nb.types.UniTuple(nb.float64[:],4)(nb.float64[:],nb.float64[:],nb.float64[:],nb.float64[:],nb.float64[:],nb.float64[:],nb.int32,nb.int32,nb.int32,nb.float64,nb.float64,nb.float64,nb.float64,nb.int32))
+@nb.jit(nb.types.UniTuple(nb.float64[:],4)(nb.float64[:],nb.float64[:],nb.float64[:],nb.float64[:],nb.float64[:],nb.float64[:],nb.int32,nb.int32,nb.int32,nb.float64,nb.float64,nb.float64,nb.float64,nb.int32),nogil=True)
 def particle_push_p(x0, v0, q, m, E0, j0, N, Ng, p2c, dx, dt, L, tol, maxiter):
     q_m = q/m
 
@@ -233,7 +238,7 @@ def initialize_p(system, N, density, Kp, perturbation, dx, Ng, Te, Ti, L, X):
     p2c = L * density / N
     kBTe = kb*Te
     kBTi = kb*Ti
-    v_thermal = np.sqrt(kBTe / me)
+    v_thermal = np.sqrt(2.0 * kBTe / me)
     #print(v_thermal / 6.5E6)
 
     LD = np.sqrt(kBTe * epsilon0 / e / e / density)
@@ -268,7 +273,7 @@ def initialize_p(system, N, density, Kp, perturbation, dx, Ng, Te, Ti, L, X):
         d_landau = -np.sqrt(np.pi) * wp * (wp/K/v_thermal)**3 * np.exp(-1./(2.0 * K**2 * LD**2) - 3./2.)
         #Assign velocity initial distribution function
         v0 = np.zeros(N)
-        v0 = np.random.normal(0.0, v_thermal ,N)
+        v0 = np.random.normal(0.0, v_thermal / np.sqrt(2) ,N)
         growth_rate = d_landau
     #end if
 
@@ -359,7 +364,7 @@ def implicit_pic(T, nplot, system, density, perturbation, Kp, N, Ng, Nv, Vmax, d
     for t in range(T):
         print('t: ',t)
 
-        rho0 = weight_density_p(x0, q, p2c, Ng, N, dx)
+        #rho0 = weight_density_p(x0, q, p2c, Ng, N, dx)
 
         x1, v1, E1, j1 = particle_push_p(x0, v0, q, m, E0, j0, N, Ng, p2c, dx, dt, L, tol, maxiter)
 
@@ -438,7 +443,7 @@ def implicit_pic(T, nplot, system, density, perturbation, Kp, N, Ng, Nv, Vmax, d
                 index_first_peak = 0
                 for s in range(len(dEE_multi)):
                     if dEE_multi[s] < 0.0 and dEE_trunc[s]>0.0:
-                        index_first_peak = s + 1
+                        index_first_peak = s
                         break
                     #end if
                 #end for
@@ -458,15 +463,21 @@ def implicit_pic(T, nplot, system, density, perturbation, Kp, N, Ng, Nv, Vmax, d
             fig6 = plt.figure(6)
             plt.clf()
             ax = fig6.subplots(2, 2)
-            ax[0,0].hist2d( x0, v0/np.sqrt(kBTe/me), bins=(100,50), range=[[0.0, L],[-5.0, 5.0]], norm=mpl.colors.PowerNorm(0.8))
+            ax[0,0].hist2d( x0, v0/np.sqrt(kBTe/me), bins=(100,50), range=[[0.0, L],[-Vmax, Vmax]], norm=mpl.colors.PowerNorm(0.8))
             #X0,V0,d0 = weight_phase_space_density_p(x0, v0/np.sqrt(kBTe/me), Ng, Nv, N, dx, dv)
             #ax[0,0].contourf(X0,V0,np.rot90(d0),7)
             ax[0,0].scatter(trajectory_x,trajectory_v,color='white',s=1.0)
-            ax[0,0].set_ylim([-5.0, 5.0])
-            ax[1,0].set_xticks([0.0, L])
+            ax[0,0].set_ylim([-Vmax, Vmax])
+            ax[0,0].set_xticks([0.0, L])
+            ax[0,0].set_title('Phase Space Density')
+            ax[0,0].set_xlabel('x [m]')
+            ax[0,0].set_ylabel('v [thermal]')
 
             ax[0,1].hist(v0/np.sqrt(kBTe/me),bins=200,orientation='horizontal',density=True,histtype='stepfilled',color='grey')
-            ax[0,1].set_ylim([-5.0, 5.0])
+            ax[0,1].set_ylim([-Vmax, Vmax])
+            ax[0,1].set_title('Total Distribution Function')
+            ax[0,1].set_xlabel('')
+            ax[0,1].set_ylabel('v [thermal]')
 
             ax[1,1].semilogy(np.array(TT) * wp, EE, linewidth=lw)
             if system == 'landau damping' and t>2:
@@ -488,14 +499,19 @@ def implicit_pic(T, nplot, system, density, perturbation, Kp, N, Ng, Nv, Vmax, d
             #end if
             ax[1,1].set_yticks([])
             ax[1,1].legend(['E2','Theoretical'])
+            ax[1,1].set_title('Total Electrostatic Energy')
+            ax[1,1].set_xlabel('t [1/wp]')
+            ax[1,1].set_ylabel('E2 [J]')
 
             ax[1,0].plot(X[:-1],smooth_field_p(0.6 * E0/np.max(E0)), linewidth=lw,color='blue')
             ax[1,0].plot(X[:-1],smooth_field_p(0.6 * j0/np.max(j0)),linewidth=lw,color='black')
-            ax[1,0].plot(X[:-1],smooth_field_p(0.6 * (rho0/np.max(rho0)-1.0)), linewidth=lw, color='orange')
+            #ax[1,0].plot(X[:-1],smooth_field_p(0.6 * (rho0/np.max(rho0)-1.0)), linewidth=lw, color='orange')
             ax[1,0].set_xticks([0.0, L-dx])
             ax[1,0].set_ylim([-1.0, 1.0])
             ax[1,0].set_xlim([0.0,L-dx])
-            ax[1,0].legend(['E','J','rho'])
+            ax[1,0].legend(['E','J'])
+            ax[1,0].set_xlabel('x [m]')
+            ax[1,0].set_ylabel('A.U.')
             plt.draw()
             plt.savefig('plots/summary_'+str(t))
             plt.pause(0.0001)
@@ -612,7 +628,7 @@ def explicit_pic(T, nplot):
             plt.xlabel('$x$ [$m$]')
             plt.ylabel('$v$ [$v_{thermal}$]')
             plt.xticks([0.0, L])
-            plt.yticks([-5.0, -2.0, 0.0, 2.0, 5.0])
+            plt.yticks([-Vmax, -Vmax/2.0, 0.0, Vmax/2.0, Vmax])
             plt.draw()
             plt.savefig('plots/ps_'+str(t))
             plt.pause(0.0001)
@@ -679,52 +695,50 @@ def explicit_pic(T, nplot):
     return EE
 #end def explicit_pic
 
+def main(T,nplot):
+        #system = 'two-stream'
+        #density = 1e10
+        #perturbation = 0.2
+        #Kp = 1
+        #N = 1000000
+        #Ng = 50
+        #dt = 0.5e-8
+        #Ti = 0.1 * 11600.
+        #Te = 0.1 * 11600.
+        #L = 15.0 * np.sqrt(kb*Te * epsilon0/e/e/density)
+        #L = np.sqrt(3.) * np.sqrt( e**2 * density / epsilon0 / me) / 2. / np.sqrt(kb*Te/me) / 2.
+
+        #system = 'bump-on-tail'
+        #density = 1e5
+        #perturbation = 0.1
+        #Kp = 1
+        #N = 1000000
+        #Ng = 50
+        #dt = 1e-6
+        #Ti = 0.1 * 11600.
+        #Te = 0.1 * 11600.
+        #L = 30.0 * np.sqrt(kb*Te * epsilon0/e/e/density)
+
+        #Landau damping best params
+        system = 'landau damping'
+        density = 1e5 # [1/m3]
+        perturbation = 0.05
+        Kp = 1
+        N =  1000000
+        Ng = 200
+        dt = 4e-5 #[s]
+        Ti = 0.1 * 11600. #[K]
+        Te = 100.0 * 11600. #[K]
+        L = 22.0 *  np.sqrt(kb*Te * epsilon0 / e / e / density)
+        Vmax = 6.0
+        Nv = Ng/2
+        tol = 1e-6
+        maxiter = 20
+
+        EE_i = implicit_pic(T,nplot,system,density,perturbation,Kp,N,Ng,Nv,Vmax,dt,Ti,Te,L,tol,maxiter)
+
+    #end def main
+
 if __name__ == '__main__':
-    #system = 'two-stream'
-    #density = 1e10
-    #perturbation = 0.2
-    #Kp = 1
-    #N = 1000000
-    #Ng = 50
-    #dt = 0.5e-8
-    #Ti = 0.1 * 11600.
-    #Te = 0.1 * 11600.
-    #L = 15.0 * np.sqrt(kb*Te * epsilon0/e/e/density)
-    #L = np.sqrt(3.) * np.sqrt( e**2 * density / epsilon0 / me) / 2. / np.sqrt(kb*Te/me) / 2.
-
-    #system = 'bump-on-tail'
-    #density = 1e5
-    #perturbation = 0.1
-    #Kp = 1
-    #N = 1000000
-    #Ng = 50
-    #dt = 1e-6
-    #Ti = 0.1 * 11600.
-    #Te = 0.1 * 11600.
-    #L = 30.0 * np.sqrt(kb*Te * epsilon0/e/e/density)
-
-    #Landau damping best params
-    system = 'landau damping'
-    density = 1e5 # [1/m3]
-    perturbation = 0.5
-    Kp = 1
-    N =  1000000
-    Ng = 100
-    dt = 1E-6 #[s]
-    Ti = 0.1 * 11600. #[K]
-    Te = 100.0 * 11600. #[K]
-    L = 20.0 *  np.sqrt(kb*Te * epsilon0 / e / e / density)
-    Vmax=5.0
-    Nv = Ng/2
-
-    T=10000
-    nplot = 100
-    tol=1e-8
-    maxiter=10
-    EE_i = implicit_pic(T,nplot,system,density,perturbation,Kp,N,Ng,Nv,Vmax,dt,Ti,Te,L,tol,maxiter)
-
-    plt.figure(7)
-    #plt.plot(EE_e)
-    plt.plot(EE_i)
-    plt.savefig('test')
-    plt.show()
+    main()
+#end if
