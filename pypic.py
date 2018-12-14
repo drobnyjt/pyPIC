@@ -29,18 +29,8 @@ mp = 1.67E-27
 me = 9.11E-31
 kb = 1.38E-23
 
-def interpolate_p(F, x, Ng, dx):
-    index_L = int( np.floor(x/dx) % Ng )
-    index_R = (index_L + 1) % Ng
-
-    w_R = (x % dx) / dx
-    w_L = 1. - w_R
-
-    return w_L * F[index_L] + w_R * F[index_R]
-#end def interpolate_p
-
 @nb.jit('float64[:](float64[:],float64[:],int32,int32,float64)', nopython=True)
-def interpolate_p_2(F, x, Ng, N, dx):
+def interpolate_p(F, x, Ng, N, dx):
     F_interp = np.zeros(N)
 
     index_L = np.floor(x/dx) % Ng
@@ -54,7 +44,7 @@ def interpolate_p_2(F, x, Ng, N, dx):
     #end for
 
     return F_interp
-#end def_interpolate_p_2
+#end def_interpolate_p
 
 @nb.jit('float64[:](float64[:])')
 def smooth_field_p(F):
@@ -154,23 +144,19 @@ def differentiate_p(F, dx, Ng):
 
 @nb.jit(nb.types.UniTuple(nb.float64[:],4)(nb.float64[:],nb.float64[:],nb.float64[:],nb.float64[:],nb.float64[:],nb.float64[:],nb.int32,nb.int32,nb.int32,nb.float64,nb.float64,nb.float64,nb.float64,nb.int32))
 def particle_push_p(x0, v0, q, m, E0, j0, N, Ng, p2c, dx, dt, L, tol, maxiter):
+    q_m = q/m
+
     #Initial guess from n-step levels
     Es = E0
     xs = x0
 
+    #(Re)set iteration count and residual
     r = 1.0
     k = 0
 
     while(r>tol) & (k<maxiter):
 
-        #Particle Loop to find local E-field
-        #for i in range(N):
-        #    E_interp[i] = interpolate_p(Eh, xh[i], Ng, dx)
-        #end for i
-
-        q_m = q/m
-
-        E_interp = interpolate_p_2(smooth_field_p(Es), xs, Ng, N, dx)
+        E_interp = interpolate_p(smooth_field_p(Es), xs, Ng, N, dx)
 
         x1 = x0 + dt * v0 + dt * dt * (q_m) * E_interp*0.5
         v1 = v0 + dt * (q_m) * E_interp
@@ -180,16 +166,11 @@ def particle_push_p(x0, v0, q, m, E0, j0, N, Ng, p2c, dx, dt, L, tol, maxiter):
 
         xh = xh % (L)
         jh = weight_current_p(xh, q, vh, p2c, Ng, N, dx)
-        #jh = smooth_field_p(jh)
 
         x1 = x1 % (L)
         j1 = weight_current_p(x1, q, v1, p2c, Ng, N, dx)
-        #j1 = smooth_field_p(j1)
-
-        #jh = (j1 + j0) * 0.5
 
         E1 = E0 + (dt/epsilon0) * (np.average(jh) - smooth_field_p(jh))
-        #E1 = smooth_field_p(E1)
         Eh = (E1 + E0) * 0.5
 
         r = np.linalg.norm(Es-Eh)
@@ -284,15 +265,7 @@ def initialize_p(system, N, density, Kp, perturbation, dx, Ng, Te, Ti, L, X):
 
 
     if system=='landau damping':
-        #d_landau = -np.sqrt(np.pi) * wp**4 / K**3 / np.sqrt(kBTe/me)**3 * np.exp(- wp**2 / K**2 / np.sqrt(kBTe/me)**2 * np.exp(-3./2.))
-        #print(d_landau)
         d_landau = -np.sqrt(np.pi) * wp * (wp/K/v_thermal)**3 * np.exp(-1./(2.0 * K**2 * LD**2) - 3./2.)
-        #d_landau = -np.sqrt(np.pi) * wp * (wp/K/v_thermal)**3 * np.exp(-1./(2.0 * K**2 * LD**2) - 3./2.)
-        #print(d_landau)
-        #le = v_thermal / wp
-        #d_landau = -np.sqrt(np.pi / 8.) * wp / (K * le)**3 * np.exp( -1./2.0/(K * le)**2 - 3./2.)
-        #print(d_landau)
-        #exit()
         #Assign velocity initial distribution function
         v0 = np.zeros(N)
         v0 = np.random.normal(0.0, v_thermal ,N)
@@ -311,64 +284,23 @@ def initialize_p(system, N, density, Kp, perturbation, dx, Ng, Te, Ti, L, X):
         #end for k
     #end for i
 
-    x0 = x0 % L
     return m, q, x0, v0, kBTe, kBTi, growth_rate, K, p2c, wp, invwp, LD
 #end def initialize_p
 
-def implicit_pic(T, nplot):
-    tol = 1e-8
-    maxiter = 100
-    np.random.seed(2)
-
+def implicit_pic(T, nplot, system, density, perturbation, Kp, N, Ng, Nv, Vmax, dt, Ti, Te, L, tol, maxiter):
+    #tracer particle for summary plot.
     tracer = 9999
-    #5 - bottom
 
-    Nv = 25
-    V = np.linspace(-5.0, 5.0, Nv)
+    #V and X domains (V domain used only for summary plot)
+    V = np.linspace(-Vmax, Vmax, Nv)
     dv = V[1] - V[0]
-
-    #system = 'two-stream'
-    #density = 1e10
-    #perturbation = 0.2
-    #Kp = 1
-    #N = 1000000
-    #Ng = 50
-    #dt = 0.5e-8
-    #Ti = 0.1 * 11600.
-    #Te = 0.1 * 11600.
-    #L = 15.0 * np.sqrt(kb*Te * epsilon0/e/e/density)
-    #L = np.sqrt(3.) * np.sqrt( e**2 * density / epsilon0 / me) / 2. / np.sqrt(kb*Te/me) / 2.
-
-    system = 'bump-on-tail'
-    density = 1e5
-    perturbation = 0.1
-    Kp = 1
-    N = 1000000
-    Ng = 50
-    dt = 1e-6
-    Ti = 0.1 * 11600.
-    Te = 0.1 * 11600.
-    L = 30.0 * np.sqrt(kb*Te * epsilon0/e/e/density)
-
-    #Landau damping best params
-    #system = 'landau damping'
-    #density = 1e5 # [1/m3]
-    #perturbation = 0.5
-    #Kp = 1
-    #N =  1000000
-    #Ng = 100
-    #dt = 1E-6 #[s]
-    #Ti = 0.1 * 11600. #[K]
-    #Te = 100.0 * 11600. #[K]
-    #L = 20.0 *  np.sqrt(kb*Te * epsilon0 / e / e / density)
-
+    X = np.linspace(0.0, L, Ng+1)
     dx = L / float(Ng)
 
-    print('L: ',L)
-    X = np.linspace(0.0, L, Ng+1)
-
+    #Initialize system
     m, q, x0, v0, kBTe, kBTi, growth_rate, K, p2c, wp, invwp, LD = initialize_p(system, N, density, Kp, perturbation, dx, Ng, Te, Ti, L, X)
 
+    #Print plasma parameters
     print("wp : ",wp,"[1/s]")
     print("dt : ",dt/invwp," [dt * wp]")
     print("tau: ",invwp,"[s]")
@@ -384,6 +316,7 @@ def implicit_pic(T, nplot):
     #end for i
     fig6 = plt.figure(6,figsize=(20,10))
 
+    #Initialize time-tracking arrays.
     KE = []
     EE = []
     TT = []
@@ -391,8 +324,11 @@ def implicit_pic(T, nplot):
     trajectory_v = []
     trajectory_x = []
 
+    #colormap for scatterplot that approximates density plot
     scattermap = plt.cm.viridis( 1.0 - 2.0 * np.sqrt(v0 * v0) / np.max( np.sqrt( v0*v0 ) ) )
     #scattermap = plt.cm.coolwarm((v0 + 0.5*np.max(v0))/np.max(v0))
+
+    #Initialize some arrays.
     E0 = np.zeros(Ng)
     Eh = np.zeros(Ng)
     E1 = np.zeros(Ng)
@@ -413,17 +349,12 @@ def implicit_pic(T, nplot):
     rho0 = np.zeros(Ng)
     phi0 = np.zeros(Ng)
 
+    #Find initial electric field via poisosn solve.
     rho0 = weight_density_p(x0, q, p2c, Ng, N, dx)
-    rho00 = rho0
     j0 = weight_current_p(x0, q, v0, p2c, Ng, N, dx)
-    j00 = j0
     phi0 = solve_poisson_p(dx, Ng, rho0, phi0)
     phi0 = phi0 - np.max(phi0)
     E0 = -differentiate_p(phi0, dx, Ng)
-    E00 = E0
-
-    r = 1.0
-    k = 0
 
     for t in range(T):
         print('t: ',t)
@@ -436,13 +367,12 @@ def implicit_pic(T, nplot):
         x0 = x1
         v0 = v1
         j0 = j1
-        k = 0
-        r = 1.0
 
+        #Find time-tracked information.
+        TT.append(t * dt)
         EE.append(np.sum(epsilon0 * E0*E0 * dx / 2.))
         KE.append(p2c * np.sum(me * v0*v0 / 2.))
         print("Total Energy: ", np.sum(epsilon0 * E0*E0 * dx / 2.) + p2c * np.sum(me * v0*v0 / 2.))
-        TT.append(t * dt)
         j_bias.append(np.average(j0))
         trajectory_x.append(x0[tracer])
         trajectory_v.append(v0[tracer]/np.sqrt(kBTe/me))
@@ -466,7 +396,6 @@ def implicit_pic(T, nplot):
             plt.draw()
             plt.savefig('plots/ps_'+str(t))
             plt.pause(0.0001)
-
 
             plt.figure(2)
             plt.clf()
@@ -751,8 +680,49 @@ def explicit_pic(T, nplot):
 #end def explicit_pic
 
 if __name__ == '__main__':
-    #EE_e = explicit_pic(200,10)
-    EE_i = implicit_pic(1000,10)
+    #system = 'two-stream'
+    #density = 1e10
+    #perturbation = 0.2
+    #Kp = 1
+    #N = 1000000
+    #Ng = 50
+    #dt = 0.5e-8
+    #Ti = 0.1 * 11600.
+    #Te = 0.1 * 11600.
+    #L = 15.0 * np.sqrt(kb*Te * epsilon0/e/e/density)
+    #L = np.sqrt(3.) * np.sqrt( e**2 * density / epsilon0 / me) / 2. / np.sqrt(kb*Te/me) / 2.
+
+    #system = 'bump-on-tail'
+    #density = 1e5
+    #perturbation = 0.1
+    #Kp = 1
+    #N = 1000000
+    #Ng = 50
+    #dt = 1e-6
+    #Ti = 0.1 * 11600.
+    #Te = 0.1 * 11600.
+    #L = 30.0 * np.sqrt(kb*Te * epsilon0/e/e/density)
+
+    #Landau damping best params
+    system = 'landau damping'
+    density = 1e5 # [1/m3]
+    perturbation = 0.5
+    Kp = 1
+    N =  1000000
+    Ng = 100
+    dt = 1E-6 #[s]
+    Ti = 0.1 * 11600. #[K]
+    Te = 100.0 * 11600. #[K]
+    L = 20.0 *  np.sqrt(kb*Te * epsilon0 / e / e / density)
+    Vmax=5.0
+    Nv = Ng/2
+
+    T=10000
+    nplot = 100
+    tol=1e-8
+    maxiter=10
+    EE_i = implicit_pic(T,nplot,system,density,perturbation,Kp,N,Ng,Nv,Vmax,dt,Ti,Te,L,tol,maxiter)
+
     plt.figure(7)
     #plt.plot(EE_e)
     plt.plot(EE_i)
