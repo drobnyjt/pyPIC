@@ -32,6 +32,18 @@ kb = 1.38E-23
 
 @nb.jit('float64[:](float64[:],float64[:],int32,int32,float64)', nopython=True,nogil=True)
 def interpolate_p(F, x, Ng, N, dx):
+    """
+    Interpolates field values F from grid to positions in x with periodic BCs.
+
+    Args:
+        F (:obj:'numpy.ndarray'): Field to interpolate.
+        x (:obj:'numpy.ndarray'): Spatial positions to interpolate to. [m]
+        Ng (int): Number of gridpoints of field.
+        dx (float): grid spacing. [m]
+
+    Returns:
+        F_interp (:obj:'numpy.ndarray'): Array of interpolated values.
+    """
     F_interp = np.zeros(N)
     idx = (1./dx)
 
@@ -50,12 +62,36 @@ def interpolate_p(F, x, Ng, N, dx):
 
 @nb.jit('float64[:](float64[:])')
 def smooth_field_p(F):
+    """
+    Applies simple binomial smoothing to a field on the grid with perioidic BCs.
+
+    Args:
+        F (:obj:'numpy.ndarray'): Field to smooth.
+
+    Returns:
+        F_smooth (:obj:'numpy.ndarray'): Smoothed field.
+    """
     F_smooth = (np.roll(F,-1) + 2.0 * F + np.roll(F,1)) / 4.0
     return F_smooth
 #end def smooth_field_p
 
 @nb.jit('float64[:](float64[:], float64[:], float64[:], int32, int32, int32, float64)',nogil=True,nopython=True)
 def weight_current_p(x, q, v, p2c, Ng, N, dx):
+    """
+    Weights current values from particle to the grid.
+
+    Args:
+        x (:obj:'numpy.ndarray'): Particle position list. [m]
+        q (:obj:'numpy.ndarray'): Particle charge list. [C]
+        v (:obj:'numpy.ndarray'): Particle velocity list. [m/s]
+        p2c (float): Number of physical particles represented by one computational particle.
+        Ng (int): Number of grid points.
+        N (int): Number of particles.
+        dx (float): Grid spacing. [m]
+
+    Returns:
+        j (:obj:'numpy.ndarray'): Current density. [A/m^2]
+    """
     j = np.zeros(Ng)
     idx = (1./dx)
 
@@ -80,6 +116,20 @@ def weight_current_p(x, q, v, p2c, Ng, N, dx):
 
 @nb.jit('float64[:](float64[:], float64[:], int32, int32, int32, float64)',nopython=True,nogil=True)
 def weight_density_p(x, q, p2c, Ng, N, dx):
+    """
+    Weights charge density to grid.
+
+    Args:
+        x (:obj:'numpy.ndarray'): Particle position list. [m]
+        q (:obj:'numpy.ndarray'): Particle charge list. [C]
+        p2c (float): Number of physical particles represented by one computational particle.
+        Ng (int): Number of grid points.
+        N (int): Number of particles.
+        dx (float): Grid spacing. [m]
+
+    Returns:
+        rho (:obj:'numpy.ndarray'): Charge density. [C/m^3]
+    """
     rho = np.zeros(Ng)
 
     index_L = x/dx# % Ng
@@ -105,6 +155,18 @@ def weight_density_p(x, q, p2c, Ng, N, dx):
 
 @nb.jit('float64[:](float64[:], float64, int32)',nopython=True,nogil=True)
 def differentiate_p(F, dx, Ng):
+    """
+    Numerically differentiate a field with perioidic BCs.
+
+    Args:
+        F (:obj:'numpy.ndarray'): Field to differentiate numerically.
+        dx (float): Grid-spacing. [m]
+        Ng (int): Number of grid points.
+
+    Returns:
+        dF (:obj:'numpy.ndarray'): Differentiated field.
+
+    """
     dF = np.zeros(Ng)
     idx = (1./dx)
 
@@ -119,6 +181,34 @@ def differentiate_p(F, dx, Ng):
 
 @nb.jit(nb.types.UniTuple(nb.float64[:],4)(nb.float64[:],nb.float64[:],nb.float64[:],nb.float64[:],nb.float64[:],nb.float64[:],nb.int32,nb.int32,nb.int32,nb.float64,nb.float64,nb.float64,nb.float64,nb.int32),nogil=True)
 def particle_push_p(x0, v0, q, m, E0, j0, N, Ng, p2c, dx, dt, L, tol, maxiter):
+    """
+        Implicit particle pusher and field advancer. Uses Picard iteration and a
+        Crank-Nicholson Discretization of the Lorentz force equation to push
+        particles in time. Fields are weighted and evolved using Ampere's Law.
+
+        Args:
+            x0 (:obj:'numpy.ndarray'): Initial particle position list. [m]
+            v0 (:obj:'numpy.ndarray'): Initial particle velocity list. [m/s]
+            q (:obj:'numpy.ndarray'): Particle charge list. [C]
+            m (:obj:'numpy.ndarray'): Particle mass list. [kg]
+            E0 (:obj:'numpy.ndarray'): Initial electric field on grid. [V/m]
+            j0 (:obj:'numpy.ndarray'): Initial current density on grid. [A/m^2]
+            N (int): Number of particles.
+            Ng (int): Number of grid points.
+            p2c (float): real to computatinal particle ratio.
+            dx (float): Grid spacing. [m]
+            dt (float): timestep. [s]
+            L (float): Domain size. [m]
+            tol (float): tolerance for electric field. [V^2/m^2]
+            maxiter (int): maximum number of iterations for Picard loop.
+
+        Returns:
+            x1 (:obj:'numpy.ndarray'): Final particle posiiton list. [m]
+            v1 (:obj:'numpy.ndarray'): Final particle velocity list. [m/s]
+            E1 (:obj:'numpy.ndarray'): Final electric field. [V/m]
+            j1 (:obj:'numpy.ndarray'): Final current density. [A/m^2]
+
+    """
     q_m = q/m
 
     #Initial guess from n-step levels
@@ -161,6 +251,16 @@ def particle_push_p(x0, v0, q, m, E0, j0, N, Ng, p2c, dx, dt, L, tol, maxiter):
 #end def particle_push_p
 
 def differentiate_t(F, dt):
+    """
+        Differentiate a field w.r.t. time.
+
+        Args:
+            F (:obj:'numpy.ndarray'): Values over time to differentiate.
+            dt (float): timestep. [s]
+
+        Returns:
+            dF (:obj:'numpy.ndarray'): Differentiated field in time.
+    """
     T = len(F)
     dF = np.zeros(T)
 
@@ -176,6 +276,15 @@ def differentiate_t(F, dt):
 #end differentiate_t
 
 def laplacian_1D_p(Ng):
+    """
+        Generate 1D laplacian to solve Poisson's problem.
+
+        Args:
+            Ng (int): Number of grid points.
+
+        Returns:
+            A (:obj:'numpy.ndarray'): 1D Laplacian stencil.
+    """
     A =sp.diag(np.ones(Ng-1),-1) + sp.diag(-2.*np.ones(Ng),0) + sp.diag(np.ones(Ng-1),1)
     A[0, 0]  = -2.
     A[0, 1]  =  1.
@@ -189,6 +298,18 @@ def laplacian_1D_p(Ng):
 #end def laplacian_1D_p
 
 def solve_poisson_p(dx, Ng, rho, phi0):
+    """
+    Solves a 1D Poisson Problem using scipy sparse matrix routines.
+
+    Args:
+        dx (float): Grid spacing. [m]
+        Ng (int): Number of grid points.
+        rho (:obj:'numpy.ndarray'): Charge density. [C/m^3]
+        phi0 (:obj:'numpy.ndarray'): Initial guess of electric potential. [V]
+
+    Returns:
+        phi (:obj:'numpy.ndarray'): Solved electric potential. [V]
+    """
     phi = phi0
     D = np.zeros((Ng,Ng))
     A = spp.csc_matrix(laplacian_1D_p(Ng))
@@ -202,6 +323,36 @@ def solve_poisson_p(dx, Ng, rho, phi0):
 #end def solve_poisson_p
 
 def initialize_p(system, N, density, Kp, perturbation, dx, Ng, Te, Ti, L, X):
+    """
+    Initialize a particle-in-cell simulation.
+
+    Args:
+        system (:obj:'str'): system name. Options are 'bump-on-tail', 'two-stream', and 'landau-damping.'
+        N (int): Number of particles.
+        density (float): Number density of species. [1/m^3]
+        Kp (float): Number of wavelengths in domain for perturbation.
+        perturbation (float): Strength of perturbation.
+        dx (float): Grid-spacing. [m]
+        Ng (int): Number of grid points.
+        Te (float): Electron temperature. [eV]
+        Ti (float): Ion temperature. [eV]
+        L (float): Domain size. [m]
+        X (:obj:'numpy.ndarray'): Grid positions list. [m]
+
+    Returns:
+        m (:obj:'numpy.ndarray'): List of particle masses. [kg]
+        q (:obj:'numpy.ndarray'): List of particle charges. [C]
+        x0 (:obj:'numpy.ndarray'): Initial particle position list. [m]
+        v0 (:obj:'numpy.ndarray'): Initial particle velocity list. [m]
+        kBTe (float): Electron temperature times Boltzmann's constant. [J]
+        kBTi (float): Ion temperature times Boltzmann's constant. [J]
+        growth_rate (float): Theoretical growth rate of instability.
+        K (float): Wavenumber of perturbation. [1/m]
+        p2c (float): Ratio of real to computational particles.
+        wp (float): Plasma frequency (electrons). [rad/s]
+        invwp (float): Inverse plasma frequency (electrons). [s/rad]
+        LD (float): Debye length. [m]
+    """
     wp = np.sqrt( e**2 * density / epsilon0 / me)
     invwp = 1./wp
     K = Kp * 2.0 * np.pi / L
@@ -239,7 +390,7 @@ def initialize_p(system, N, density, Kp, perturbation, dx, Ng, Te, Ti, L, X):
     #end if
 
 
-    if system=='landau damping':
+    if system=='landau-damping':
         d_landau = -np.sqrt(np.pi) * wp * (wp/K/v_thermal)**3 * np.exp(-1./(2.0 * K**2 * LD**2) - 3./2.)
         #Assign velocity initial distribution function
         v0 = np.zeros(N)
@@ -263,6 +414,27 @@ def initialize_p(system, N, density, Kp, perturbation, dx, Ng, Te, Ti, L, X):
 #end def initialize_p
 
 def implicit_pic(T, nplot, system, density, perturbation, Kp, N, Ng, Nv, Vmax, dt, Ti, Te, L, tol, maxiter):
+    """
+    Main implicit particle-in-cell routine. Produces live plots of all relevant parameters.
+
+    Args:
+        T (int): Number of time steps.
+        nplot (int): Number of time steps between plots.
+        system (:obj:'str'): system type. Options are 'bump-on-tail', 'two-stream', and 'landau-damping'.
+        density (float): Number density of simulation. [1/m^3]
+        perturbation (float): Perturbation strength.
+        Kp (float): Wavelengths per domain.
+        N (int): Number of particles.
+        Ng (int): Number of gridpoints.
+        Nv (int): Number of velocity gridpoints for phase-space plots.
+        Vmax (float): Max velocity for phase-space plots. [m/s]
+        dt (float): Timestep. [s]
+        Ti (float): Ion temperature. [eV]
+        Te (float): Electron temperature. [eV]
+        L (float): domainsize. [m]
+        tol (float): tolerance on electric field squared error. [V^2/m^2]
+        maxiter (int): Maximum number of Picard iterations.
+    """
     #tracer particle for summary plot.
     tracer = 9999
 
@@ -405,7 +577,7 @@ def implicit_pic(T, nplot, system, density, perturbation, Kp, N, Ng, Nv, Vmax, d
             plt.figure(5)
             plt.clf()
             plt.semilogy(np.array(TT)*wp,EE,linewidth=lw)
-            if system == 'landau damping' and t>2:
+            if system == 'landau-damping' and t>2:
                 dEE = differentiate_t(EE, dt)
                 dEE_shift = dEE[1:]
                 dEE_trunc = dEE[:-1]
@@ -449,7 +621,7 @@ def implicit_pic(T, nplot, system, density, perturbation, Kp, N, Ng, Nv, Vmax, d
             ax[0,1].set_ylabel('v [thermal]')
 
             ax[1,1].semilogy(np.array(TT) * wp, EE, linewidth=lw)
-            if system == 'landau damping' and t>2:
+            if system == 'landau-damping' and t>2:
                 dEE = differentiate_t(EE, dt)
                 dEE_shift = dEE[1:]
                 dEE_trunc = dEE[:-1]
@@ -517,8 +689,8 @@ def explicit_pic(T, nplot):
     #Ti = 0.1 * 11600.
     #Te = 10.0 * 11600.
 
-    #Landau damping best params
-    #system = 'landau damping'
+    #landau-damping best params
+    #system = 'landau-damping'
     #density = 1e10 # [1/m3]
     #perturbation = 0.05
     #Kp = 2
@@ -635,7 +807,7 @@ def explicit_pic(T, nplot):
             plt.figure(5)
             plt.clf()
             plt.semilogy(np.array(TT)*wp,EE,linewidth=lw)
-            if system == 'landau damping':
+            if system == 'landau-damping':
                 plt.semilogy(np.array(TT)*wp,np.max(EE)*np.exp(np.ones(np.size(TT))*growth_rate * TT),linewidth=lw)
             else:
                 plt.semilogy(np.array(TT)*wp,np.min(EE)*np.exp(np.ones(np.size(TT))*growth_rate * TT),linewidth=lw)
@@ -665,49 +837,56 @@ def explicit_pic(T, nplot):
 #end def explicit_pic
 
 def main(T,nplot):
-        #system = 'two-stream'
-        #density = 1e10
-        #perturbation = 0.2
-        #Kp = 1
-        #N = 1000000
-        #Ng = 50
-        #dt = 0.5e-8
-        #Ti = 0.1 * 11600.
-        #Te = 0.1 * 11600.
-        #L = 15.0 * np.sqrt(kb*Te * epsilon0/e/e/density)
-        #L = np.sqrt(3.) * np.sqrt( e**2 * density / epsilon0 / me) / 2. / np.sqrt(kb*Te/me) / 2.
+    """
+    Runs an implicit particle-in-cell simulation.
 
-        #system = 'bump-on-tail'
-        #density = 1e5
-        #perturbation = 0.1
-        #Kp = 1
-        #N = 1000000
-        #Ng = 50
-        #dt = 1e-6
-        #Ti = 0.1 * 11600.
-        #Te = 0.1 * 11600.
-        #L = 30.0 * np.sqrt(kb*Te * epsilon0/e/e/density)
+    Args:
+        T (int): Number of timesteps.
+        nplot (int): Number of timesteps between plots.
+    """
+    #system = 'two-stream'
+    #density = 1e10
+    #perturbation = 0.2
+    #Kp = 1
+    #N = 1000000
+    #Ng = 50
+    #dt = 0.5e-8
+    #Ti = 0.1 * 11600.
+    #Te = 0.1 * 11600.
+    #L = 15.0 * np.sqrt(kb*Te * epsilon0/e/e/density)
+    #L = np.sqrt(3.) * np.sqrt( e**2 * density / epsilon0 / me) / 2. / np.sqrt(kb*Te/me) / 2.
 
-        #Landau damping best params
-        system = 'landau damping'
-        density = 1e5 # [1/m3]
-        perturbation = 0.1
-        Kp = 1
-        N =  1000000
-        Ng = 100
-        dt = 1e-5 #[s]
-        Ti = 0.1 * 11600. #[K]
-        Te = 100.0 * 11600. #[K]
-        L = 22.0 *  np.sqrt(kb*Te * epsilon0 / e / e / density)
-        Vmax = 6.0
-        Nv = Ng/2
-        tol = 1e-6
-        maxiter = 20
+    #system = 'bump-on-tail'
+    #density = 1e5
+    #perturbation = 0.1
+    #Kp = 1
+    #N = 1000000
+    #Ng = 50
+    #dt = 1e-6
+    #Ti = 0.1 * 11600.
+    #Te = 0.1 * 11600.
+    #L = 30.0 * np.sqrt(kb*Te * epsilon0/e/e/density)
 
-        EE_i = implicit_pic(T,nplot,system,density,perturbation,Kp,N,Ng,Nv,Vmax,dt,Ti,Te,L,tol,maxiter)
+    #landau-damping best params
+    system = 'landau-damping'
+    density = 1e5 # [1/m3]
+    perturbation = 0.1
+    Kp = 1
+    N =  1000000
+    Ng = 100
+    dt = 1e-5 #[s]
+    Ti = 0.1 * 11600. #[K]
+    Te = 100.0 * 11600. #[K]
+    L = 22.0 *  np.sqrt(kb*Te * epsilon0 / e / e / density)
+    Vmax = 6.0
+    Nv = Ng/2
+    tol = 1e-6
+    maxiter = 20
 
-    #end def main
+    EE_i = implicit_pic(T,nplot,system,density,perturbation,Kp,N,Ng,Nv,Vmax,dt,Ti,Te,L,tol,maxiter)
+
+#end def main
 
 if __name__ == '__main__':
-    main()
+    main(100,10)
 #end if
