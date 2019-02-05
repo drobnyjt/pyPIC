@@ -78,36 +78,6 @@ def weight_current_p(x, q, v, p2c, Ng, N, dx):
     return j
 #end def weight_current_p
 
-@nb.jit(nb.types.UniTuple(nb.float64[:],4)(nb.float64[:],nb.float64[:],nb.int32,nb.int32,nb.int32,nb.float64,nb.float64,nb.float64))
-def weight_phase_space_density_p(x, v, Ng, Nv, N, dx, dv, Vmax):
-    d = np.zeros((Ng,Nv))
-    X = np.linspace(0.0, Ng*dx, Ng)
-    V = np.linspace(-Vmax, Vmax, Nv)
-
-    index_v_S = np.floor(v/dv)
-    index_v_S = index_v_S - np.min(index_v_S)
-    index_v_N = (index_v_S + 1)
-
-    index_x_W = np.floor(x/dx) % Ng
-    index_x_E = (index_x_W + 1) % Ng
-
-    w_NE = (x % dx) * (v % dv) / dx / dv
-    w_NW = (dx - x%dx) * (v % dv) / dx / dv
-    w_SE = (x % dx) * (dv - v % dv) / dx / dv
-    w_SW = (dx - x % dx) * (dv - v % dv) / dx / dv
-
-    print(np.max(index_v_S))
-
-    for i in range(N):
-        d[int(index_x_W[i]), int(index_v_S[i])] += w_SW[i]
-        d[int(index_x_E[i]), int(index_v_S[i])] += w_SE[i]
-        d[int(index_x_W[i]), int(index_v_N[i])] += w_NW[i]
-        d[int(index_x_E[i]), int(index_v_N[i])] += w_NE[i]
-    #end for i
-    d = sp.ndimage.gaussian_filter(d,[2.0 * dx, 2.0 * dv])
-    return X,V,d
-#end def weight_phase_space_density_p
-
 @nb.jit('float64[:](float64[:], float64[:], int32, int32, int32, float64)',nopython=True,nogil=True)
 def weight_density_p(x, q, p2c, Ng, N, dx):
     rho = np.zeros(Ng)
@@ -464,7 +434,6 @@ def implicit_pic(T, nplot, system, density, perturbation, Kp, N, Ng, Nv, Vmax, d
             plt.clf()
             ax = fig6.subplots(2, 2)
             ax[0,0].hist2d( x0, v0/np.sqrt(kBTe/me), bins=(100,50), range=[[0.0, L],[-Vmax, Vmax]], norm=mpl.colors.PowerNorm(0.8))
-            #X0,V0,d0 = weight_phase_space_density_p(x0, v0/np.sqrt(kBTe/me), Ng, Nv, N, dx, dv)
             #ax[0,0].contourf(X0,V0,np.rot90(d0),7)
             ax[0,0].scatter(trajectory_x,trajectory_v,color='white',s=1.0)
             ax[0,0].set_ylim([-Vmax, Vmax])
@@ -722,11 +691,11 @@ def main(T,nplot):
         #Landau damping best params
         system = 'landau damping'
         density = 1e5 # [1/m3]
-        perturbation = 0.05
+        perturbation = 0.1
         Kp = 1
         N =  1000000
-        Ng = 200
-        dt = 4e-5 #[s]
+        Ng = 100
+        dt = 1e-5 #[s]
         Ti = 0.1 * 11600. #[K]
         Te = 100.0 * 11600. #[K]
         L = 22.0 *  np.sqrt(kb*Te * epsilon0 / e / e / density)
