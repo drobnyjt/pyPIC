@@ -44,11 +44,11 @@ def interpolate_p(F, x, Ng, N, dx):
 
     idx = (1./dx)
 
-    #Calculate cell index from particle positions
+    #Calculate left and right cell index arrays from particle positions
     index_L = x*idx #% Ng
     index_R = (index_L + 1)%Ng
 
-    #Calculate weight array from particle positions
+    #Calculate left and right weight arrays from particle positions
     w_R = (x%dx)*idx
     w_L = 1. - w_R
 
@@ -75,6 +75,19 @@ def smooth_field_p(F):
     return F_smooth
 #end def smooth_field_p
 
+@nb.jit(nb.types.UniTuple(nb.float64[:],4)(nb.float64[:], nb.int32, nb.int32, nb.float64[:]),nopython=True,nogil=True,parallel=True,fastmath=True)
+def find_cell_indices_and_weights_p(x,Ng,N,dx):
+    #Calculate left and right cell index arrays from particle positions
+    index_L = x/dx
+    index_R = (index_L + 1)%Ng
+
+    #Calculate left and right weight arrays from particle positions
+    w_R = (x%dx)/dx
+    w_L = 1. - w_R
+
+    return index_L, index_R, w_R, w_L
+#end def find_cell_indices_and_weights_p
+
 @nb.jit('float64[:](float64[:], float64[:], float64[:], int32, int32, int32, float64)',nogil=True,nopython=True,parallel=True,fastmath=True)
 def weight_current_p(x, q, v, p2c, Ng, N, dx):
     """
@@ -96,11 +109,11 @@ def weight_current_p(x, q, v, p2c, Ng, N, dx):
     j = np.zeros(Ng)
     idx = (1./dx)
 
-    #Calculate cell index arrays from particle positions
+    #Calculate left and right cell index arrays from particle positions
     index_L = x*idx
     index_R = (index_L + 1)%Ng
 
-    #Calculate weight arrays from particle positions
+    #Calculate left and right weight arrays from particle positions
     w_R = (x%dx)*idx
     w_L = 1. - w_R
 
@@ -143,7 +156,7 @@ def weight_density_p(x, q, p2c, Ng, N, dx):
 
     idx = (1./dx)
 
-    #Calculate cell index arrays from particle positions
+    #Calculate left and right cell index arrays from particle positions
     index_L = x*idx# % Ng
     index_R = (index_L + 1)%Ng
 
@@ -151,7 +164,7 @@ def weight_density_p(x, q, p2c, Ng, N, dx):
     w_R = (x%dx)/dx
     w_L = 1. - w_R
 
-    #Calculat prefactor for charge density calculation
+    #Calculate prefactor for charge density calculation
     q_i = q*p2c*idx
 
     #Calculate charge density contribution to left and right grid nodes for each
@@ -296,7 +309,7 @@ def differentiate_t(F, dt):
 
         And on the final time step:
 
-        dF    F(t) - F(t-dt)
+        dF     F(t) - F(t-dt)
         __ ~= ________________
         dt         dt
 
@@ -832,7 +845,7 @@ def main(T,nplot):
     #landau-damping best params
     system = 'landau-damping'
     density = 1e5 # [1/m3]
-    perturbation = 0.4
+    perturbation = 0.8
     Kp = 1
     N =  1000000
     Ng = 200
