@@ -6,14 +6,9 @@ import matplotlib.pyplot as plt
 import time
 import math
 import scipy as sp
-import scipy.ndimage as nd
 import scipy.sparse as spp
 import scipy.sparse.linalg as sppla
 import numba as nb
-
-import seaborn as sns
-
-from concurrent.futures import ThreadPoolExecutor as PoolExecutor
 
 mpl.rc('font',**{'family':'sans-serif','sans-serif':['Helvetica'], 'size' : 12})
 ## for Palatino and other serif fonts use:
@@ -30,7 +25,7 @@ mp = 1.67E-27
 me = 9.11E-31
 kb = 1.38E-23
 
-@nb.jit('float64[:](float64[:],float64[:],int32,int32,float64)', nopython=True,nogil=True)
+@nb.jit('float64[:](float64[:],float64[:],int32,int32,float64)',nopython=True,nogil=True,parallel=True,fastmath=True)
 def interpolate_p(F, x, Ng, N, dx):
     """
     Interpolates field values F from grid to positions in x with periodic BCs.
@@ -44,23 +39,28 @@ def interpolate_p(F, x, Ng, N, dx):
     Returns:
         F_interp (:obj:'numpy.ndarray'): Array of interpolated values.
     """
+    #Initialize interpolated field array.
     F_interp = np.zeros(N)
+
     idx = (1./dx)
 
-    index_L = x/dx #% Ng
-    index_R = (index_L + 1) % Ng
+    #Calculate cell index from particle positions
+    index_L = x*idx #% Ng
+    index_R = (index_L + 1)%Ng
 
-    w_R = (x % dx) * idx
+    #Calculate weight array from particle positions
+    w_R = (x%dx)*idx
     w_L = 1. - w_R
 
+    #For every particle, find the interpolated field value at its position
     for i in range(N):
-        F_interp[i] = F[int(index_L[i])] * w_L[i] + F[int(index_R[i])] * w_R[i]
+        F_interp[i] = F[int(index_L[i])]*w_L[i] + F[int(index_R[i])]*w_R[i]
     #end for
 
     return F_interp
 #end def_interpolate_p
 
-@nb.jit('float64[:](float64[:])')
+@nb.jit('float64[:](float64[:])',nogil=True,fastmath=True)
 def smooth_field_p(F):
     """
     Applies simple binomial smoothing to a field on the grid with perioidic BCs.
@@ -71,11 +71,11 @@ def smooth_field_p(F):
     Returns:
         F_smooth (:obj:'numpy.ndarray'): Smoothed field.
     """
-    F_smooth = (np.roll(F,-1) + 2.0 * F + np.roll(F,1)) / 4.0
+    F_smooth = (np.roll(F,-1) + 2.0 * F + np.roll(F,1)) * 0.25
     return F_smooth
 #end def smooth_field_p
 
-@nb.jit('float64[:](float64[:], float64[:], float64[:], int32, int32, int32, float64)',nogil=True,nopython=True)
+@nb.jit('float64[:](float64[:], float64[:], float64[:], int32, int32, int32, float64)',nogil=True,nopython=True,parallel=True,fastmath=True)
 def weight_current_p(x, q, v, p2c, Ng, N, dx):
     """
     Weights current values from particle to the grid.
@@ -92,20 +92,28 @@ def weight_current_p(x, q, v, p2c, Ng, N, dx):
     Returns:
         j (:obj:'numpy.ndarray'): Current density. [A/m^2]
     """
+    #Initialize empty current array
     j = np.zeros(Ng)
     idx = (1./dx)
 
-    index_L = x/dx# % Ng
-    index_R = (index_L + 1) % Ng
+    #Calculate cell index arrays from particle positions
+    index_L = x*idx
+    index_R = (index_L + 1)%Ng
 
-    w_R = (x % dx) * idx
+    #Calculate weight arrays from particle positions
+    w_R = (x%dx)*idx
     w_L = 1. - w_R
 
-    j_i = q * v * p2c * idx
+    #Calculate prefactor array for current density calculation
+    j_i = q*v*p2c*idx
 
-    j_L = j_i * w_L
-    j_R = j_i * w_R
+    #Calculate current density contribution on left and right grid nodes for
+    #every particle
+    j_L = j_i*w_L
+    j_R = j_i*w_R
 
+    #For every particle, add its contribution to the grid nodes to the left and
+    #right
     for i in range(N):
         j[int(index_L[i])] += j_L[i]
         j[int(index_R[i])] += j_R[i]
@@ -114,7 +122,7 @@ def weight_current_p(x, q, v, p2c, Ng, N, dx):
     return j
 #end def weight_current_p
 
-@nb.jit('float64[:](float64[:], float64[:], int32, int32, int32, float64)',nopython=True,nogil=True)
+@nb.jit('float64[:](float64[:], float64[:], int32, int32, int32, float64)',nopython=True,nogil=True,parallel=True)
 def weight_density_p(x, q, p2c, Ng, N, dx):
     """
     Weights charge density to grid.
@@ -130,21 +138,29 @@ def weight_density_p(x, q, p2c, Ng, N, dx):
     Returns:
         rho (:obj:'numpy.ndarray'): Charge density. [C/m^3]
     """
+    #Initialize empty current density array
     rho = np.zeros(Ng)
-
-    index_L = x/dx# % Ng
-    index_R = (index_L + 1) % Ng
-
-    w_R = (x % dx) / dx
-    w_L = 1. - w_R
 
     idx = (1./dx)
 
-    q_i = q * p2c * idx
+    #Calculate cell index arrays from particle positions
+    index_L = x*idx# % Ng
+    index_R = (index_L + 1)%Ng
 
-    q_L = q_i * w_L
-    q_R = q_i * w_R
+    #Calculate left and right weight arrays from particle posiitons
+    w_R = (x%dx)/dx
+    w_L = 1. - w_R
 
+    #Calculat prefactor for charge density calculation
+    q_i = q*p2c*idx
+
+    #Calculate charge density contribution to left and right grid nodes for each
+    #particle
+    q_L = q_i*w_L
+    q_R = q_i*w_R
+
+    #For every particle, add its charge density contribution to the left and
+    #right grid nodes
     for i in range(N):
         rho[int(index_L[i])] += q_L[i]
         rho[int(index_R[i])] += q_R[i]
@@ -158,6 +174,10 @@ def differentiate_p(F, dx, Ng):
     """
     Numerically differentiate a field with perioidic BCs.
 
+    dF     F(x+dx) - F(x-dx)
+    __ ~= ___________________
+    dx           2 dx
+
     Args:
         F (:obj:'numpy.ndarray'): Field to differentiate numerically.
         dx (float): Grid-spacing. [m]
@@ -165,26 +185,29 @@ def differentiate_p(F, dx, Ng):
 
     Returns:
         dF (:obj:'numpy.ndarray'): Differentiated field.
-
     """
+    #Initialize empty differentiated field array
     dF = np.zeros(Ng)
-    idx = (1./dx)
+    idx_2 = (0.5/dx)
 
+    #Loop over all grid points and calculate numerical derivative
     for i in range(Ng):
-        ind_L = (i-1)# % Ng
-        ind_R = (i+1) % Ng
-        dF[i] = (F[ind_R] - F[ind_L]) * idx * 0.5
+        ind_L = (i - 1)# % Ng
+        ind_R = (i + 1)%Ng
+        dF[i] = (F[ind_R] - F[ind_L])*idx_2
     #end for
 
     return dF
 #end def differentiate_p
 
-@nb.jit(nb.types.UniTuple(nb.float64[:],4)(nb.float64[:],nb.float64[:],nb.float64[:],nb.float64[:],nb.float64[:],nb.float64[:],nb.int32,nb.int32,nb.int32,nb.float64,nb.float64,nb.float64,nb.float64,nb.int32),nogil=True)
+@nb.jit(nb.types.UniTuple(nb.float64[:],4)(nb.float64[:],nb.float64[:],nb.float64[:],nb.float64[:],nb.float64[:],nb.float64[:],nb.int32,nb.int32,nb.int32,nb.float64,nb.float64,nb.float64,nb.float64,nb.int32),nogil=True,parallel=True,fastmath=True)
 def particle_push_p(x0, v0, q, m, E0, j0, N, Ng, p2c, dx, dt, L, tol, maxiter):
     """
         Implicit particle pusher and field advancer. Uses Picard iteration and a
         Crank-Nicholson Discretization of the Lorentz force equation to push
-        particles in time. Fields are weighted and evolved using Ampere's Law.
+        particles in time. Fields are weighted and then evolved using a Crank-
+        Nicholson type discretization of Ampere's Law. Simple binomial filter is
+        applied to damp 2-delta-x waves.
 
         Args:
             x0 (:obj:'numpy.ndarray'): Initial particle position list. [m]
@@ -211,7 +234,7 @@ def particle_push_p(x0, v0, q, m, E0, j0, N, Ng, p2c, dx, dt, L, tol, maxiter):
     """
     q_m = q/m
 
-    #Initial guess from n-step levels
+    #Initial guess from n timestep levels for E-field and particle positions
     Es = E0
     xs = x0
 
@@ -219,27 +242,40 @@ def particle_push_p(x0, v0, q, m, E0, j0, N, Ng, p2c, dx, dt, L, tol, maxiter):
     r = 1.0
     k = 0
 
+    #Picard loop
     while(r>tol) & (k<maxiter):
-
+        #Find electric field at all particle positions using smoothed E-field
         E_interp = interpolate_p(smooth_field_p(Es), xs, Ng, N, dx)
 
-        x1 = x0 + dt * v0 + dt * dt * (q_m) * E_interp*0.5
-        v1 = v0 + dt * (q_m) * E_interp
+        #Push particles via Crank-Nicholson to n+1 timestep
+        x1 = x0 + dt*v0 + dt*dt*(q_m)*E_interp*0.5
+        v1 = v0 + dt*(q_m)*E_interp
 
-        xh = (x0 + x1) * 0.5
-        vh = (v0 + v1) * 0.5
+        #Find half timestep position and velocity by averaging n & n+1 timesteps
+        xh = (x0 + x1)*0.5
+        vh = (v0 + v1)*0.5
 
-        xh = xh % (L)
+        #Keep particles at half timestep in periodic domain
+        xh = xh%L
+        #Weight current at half time step from half timestep position & velocity
         jh = weight_current_p(xh, q, vh, p2c, Ng, N, dx)
 
-        x1 = x1 % (L)
+        #Keep particles at n+1 timestep in periodic domain
+        x1 = x1%L
+        #Weight current at n+1 time step from n+1 timestep position and velocity
         j1 = weight_current_p(x1, q, v1, p2c, Ng, N, dx)
 
-        E1 = E0 + (dt/epsilon0) * (np.average(jh) - smooth_field_p(jh))
-        Eh = (E1 + E0) * 0.5
+        #Use 1D Ampere's Law to find E-field at n+1 timestep from current at
+        #half timestep
+        E1 = E0 + (dt/epsilon0)*(np.average(jh) - smooth_field_p(jh))
+        #Find half timestep E-field from E-field at n+1 & n timesteps
+        Eh = (E1 + E0)*0.5
 
-        r = np.linalg.norm(Es-Eh)
+        #Calculate residual from E-field half timestep guess & half timestep
+        #E-field
+        r = np.sum((Es-Eh)**2)
 
+        #Set new E-field and position guesses
         Es = Eh
         xs = xh
 
@@ -252,7 +288,17 @@ def particle_push_p(x0, v0, q, m, E0, j0, N, Ng, p2c, dx, dt, L, tol, maxiter):
 
 def differentiate_t(F, dt):
     """
-        Differentiate a field w.r.t. time.
+        Differentiate a field w.r.t. time:
+
+        dF     F(t+dt) - F(t-dt)
+        __ ~= ___________________
+        dt            2 dt
+
+        And on the final time step:
+
+        dF    F(t) - F(t-dt)
+        __ ~= ________________
+        dt         dt
 
         Args:
             F (:obj:'numpy.ndarray'): Values over time to differentiate.
@@ -266,11 +312,11 @@ def differentiate_t(F, dt):
 
     dF[0] = (F[1] - F[0]) / dt
     for i in range(1, T-1):
-        ind_L = i-1
-        ind_R = i+1
-        dF[i] = (F[ind_R] - F[ind_L]) / dt * 0.5
+        ind_L = i - 1
+        ind_R = i + 1
+        dF[i] = (F[ind_R] - F[ind_L])/dt*0.5
     #end for
-    dF[T-1] = (F[T-1] - F[T-2]) / dt
+    dF[T-1] = (F[T-1] - F[T-2])/dt
 
     return dF
 #end differentiate_t
@@ -285,7 +331,7 @@ def laplacian_1D_p(Ng):
         Returns:
             A (:obj:'numpy.ndarray'): 1D Laplacian stencil.
     """
-    A =sp.diag(np.ones(Ng-1),-1) + sp.diag(-2.*np.ones(Ng),0) + sp.diag(np.ones(Ng-1),1)
+    A = sp.diag(np.ones(Ng-1),-1) + sp.diag(-2.*np.ones(Ng),0) + sp.diag(np.ones(Ng-1),1)
     A[0, 0]  = -2.
     A[0, 1]  =  1.
     A[0,-1]  =  1.
@@ -353,6 +399,7 @@ def initialize_p(system, N, density, Kp, perturbation, dx, Ng, Te, Ti, L, X):
         invwp (float): Inverse plasma frequency (electrons). [s/rad]
         LD (float): Debye length. [m]
     """
+    #Calculate plasma parameters from input parameters
     wp = np.sqrt( e**2 * density / epsilon0 / me)
     invwp = 1./wp
     K = Kp * 2.0 * np.pi / L
@@ -360,16 +407,14 @@ def initialize_p(system, N, density, Kp, perturbation, dx, Ng, Te, Ti, L, X):
     kBTe = kb*Te
     kBTi = kb*Ti
     v_thermal = np.sqrt(2.0 * kBTe / me)
-    #print(v_thermal / 6.5E6)
-
     LD = np.sqrt(kBTe * epsilon0 / e / e / density)
 
     m = np.ones(N) * me
     q = -np.ones(N) * e
 
     if system=='bump-on-tail':
-        beam_proportion = N*1/12
-        plasma_proportion = N*11/12
+        beam_proportion = N*1//6
+        plasma_proportion = N*5//6
         beam_temperature = 1./20.
         beam_drift = 4.0
         growth_rate = np.sqrt(3.)/2.*wp*(float(beam_proportion)/float(plasma_proportion)/2.)**(1./3.)
@@ -379,8 +424,8 @@ def initialize_p(system, N, density, Kp, perturbation, dx, Ng, Te, Ti, L, X):
     #end if
 
     if system=='two-stream':
-        beam_1_proportion = N*1/2
-        beam_2_proportion = N*1/2
+        beam_1_proportion = N*1//2
+        beam_2_proportion = N*1//2
         beam_temperature = 1./2.
         beam_drift = 2.0
         growth_rate = np.sqrt(3.)/2.*wp*(float(beam_1_proportion)/float(beam_2_proportion)/2.)**(1./3.)
@@ -389,13 +434,11 @@ def initialize_p(system, N, density, Kp, perturbation, dx, Ng, Te, Ti, L, X):
         v0[beam_1_proportion:] = np.random.normal(beam_drift * np.sqrt(kBTe/me), beam_temperature * np.sqrt(kBTe/me), beam_2_proportion)
     #end if
 
-
     if system=='landau-damping':
-        d_landau = -np.sqrt(np.pi) * wp * (wp/K/v_thermal)**3 * np.exp(-1./(2.0 * K**2 * LD**2) - 3./2.)
         #Assign velocity initial distribution function
         v0 = np.zeros(N)
         v0 = np.random.normal(0.0, v_thermal / np.sqrt(2) ,N)
-        growth_rate = d_landau
+        growth_rate = -np.sqrt(np.pi) * wp * (wp/K/v_thermal)**3 * np.exp(-1./(2.0 * K**2 * LD**2) - 3./2.)
     #end if
 
     #perturbation
@@ -427,7 +470,7 @@ def implicit_pic(T, nplot, system, density, perturbation, Kp, N, Ng, Nv, Vmax, d
         N (int): Number of particles.
         Ng (int): Number of gridpoints.
         Nv (int): Number of velocity gridpoints for phase-space plots.
-        Vmax (float): Max velocity for phase-space plots. [m/s]
+        Vmax (float): Max velocity for phase-space plots in thermal speeds.
         dt (float): Timestep. [s]
         Ti (float): Ion temperature. [eV]
         Te (float): Electron temperature. [eV]
@@ -435,7 +478,7 @@ def implicit_pic(T, nplot, system, density, perturbation, Kp, N, Ng, Nv, Vmax, d
         tol (float): tolerance on electric field squared error. [V^2/m^2]
         maxiter (int): Maximum number of Picard iterations.
     """
-    #tracer particle for summary plot.
+    #Tracer particle index for summary plot
     tracer = 9999
 
     #V and X domains (V domain used only for summary plot)
@@ -455,13 +498,7 @@ def implicit_pic(T, nplot, system, density, perturbation, Kp, N, Ng, Nv, Vmax, d
     print("p2c :", p2c)
     print("gamma: ",growth_rate)
 
-    #Initialize figures
-    num_figs = 5
-    for i in range(num_figs):
-        plt.figure(i+1)
-        plt.ion()
-    #end for i
-    fig6 = plt.figure(6,figsize=(20,10))
+    fig6 = plt.figure(1,figsize=(20,10))
 
     #Initialize time-tracking arrays.
     KE = []
@@ -475,7 +512,7 @@ def implicit_pic(T, nplot, system, density, perturbation, Kp, N, Ng, Nv, Vmax, d
     scattermap = plt.cm.viridis( 1.0 - 2.0 * np.sqrt(v0 * v0) / np.max( np.sqrt( v0*v0 ) ) )
     #scattermap = plt.cm.coolwarm((v0 + 0.5*np.max(v0))/np.max(v0))
 
-    #Initialize some arrays.
+    #Initialize field, position, and velocity arrays
     E0 = np.zeros(Ng)
     Eh = np.zeros(Ng)
     E1 = np.zeros(Ng)
@@ -503,13 +540,14 @@ def implicit_pic(T, nplot, system, density, perturbation, Kp, N, Ng, Nv, Vmax, d
     phi0 = phi0 - np.max(phi0)
     E0 = -differentiate_p(phi0, dx, Ng)
 
+    #Time loop
     for t in range(T):
         print('t: ',t)
 
-        #rho0 = weight_density_p(x0, q, p2c, Ng, N, dx)
-
+        #particle push and field advance
         x1, v1, E1, j1 = particle_push_p(x0, v0, q, m, E0, j0, N, Ng, p2c, dx, dt, L, tol, maxiter)
 
+        #Set new n timestep from previous n+1 timestep
         E0 = E1
         x0 = x1
         v0 = v1
@@ -526,83 +564,7 @@ def implicit_pic(T, nplot, system, density, perturbation, Kp, N, Ng, Nv, Vmax, d
 
         #Plotting routine
         if (t % nplot == 0):
-            fig = plt.figure(1)
-            plt.clf()
-
-            plt.scatter(x0[::100],v0[::100]/np.sqrt(kBTe/me),s=2.0,color=scattermap[::100])
-            plt.scatter(trajectory_x,trajectory_v,s=4.0,color='black')
-            #plt.scatter(x0[0::N/100000],v0[0::N/100000]/np.sqrt(2.0*kBTe/me),s=1.0,color=scattermap[0::N/100000])
-            ax = plt.gca()
-            #ax.set_facecolor('xkcd:dark blue')
-            plt.title('Phase Space, Implicit')
-            plt.axis([0.0, L, -9., 9.])
-            plt.xlabel('$x$ [$m$]')
-            plt.ylabel('$v$ [$v_{thermal}$]')
-            plt.xticks([0.0, L])
-            plt.yticks([-9.0, -6.0, -3.0, 0.0, 3.0, 6.0, 9.0])
-            plt.draw()
-            plt.savefig('plots/ps_'+str(t))
-            plt.pause(0.0001)
-
-            plt.figure(2)
-            plt.clf()
-            plt.plot(X[:-1],j0,linewidth=lw)
-            plt.xticks([0.0, L-dx])
-            plt.title('Current, Implicit')
-            plt.xlabel('$x$ [$m$]')
-            plt.ylabel(r'$J$ [$\frac{A}{m^{2}}$]')
-            plt.draw()
-            plt.pause(0.0001)
-
-            plt.figure(3)
-            plt.clf()
-            plt.plot(X[:-1],E0,linewidth=lw)
-            plt.xticks([0.0, L-dx])
-            plt.xlabel('$x$ [$m$]')
-            plt.ylabel(r'$E$ [$\frac{V}{m}$]')
-            plt.title('Electric Field, Implicit')
-            plt.draw()
-            plt.savefig('plots/e_'+str(t))
-            plt.pause(0.0001)
-
-            plt.figure(4)
-            plt.clf()
-            plt.semilogy(np.array(TT)*wp,KE,linewidth=lw)
-            plt.xlabel(r't [$\omega_{p}^{-1}$]')
-            plt.ylabel('$KE$ [$J$]')
-            plt.title('KE, Implicit')
-            plt.draw()
-            plt.pause(0.0001)
-
-            plt.figure(5)
-            plt.clf()
-            plt.semilogy(np.array(TT)*wp,EE,linewidth=lw)
-            if system == 'landau-damping' and t>2:
-                dEE = differentiate_t(EE, dt)
-                dEE_shift = dEE[1:]
-                dEE_trunc = dEE[:-1]
-                dEE_multi = dEE_shift * dEE_trunc
-                index_first_peak = 0
-                for s in range(len(dEE_multi)):
-                    if dEE_multi[s] < 0.0 and dEE_trunc[s]>0.0:
-                        index_first_peak = s
-                        break
-                    #end if
-                #end for
-                plt.semilogy(np.array(TT)*wp+TT[index_first_peak]*wp,EE[index_first_peak]*np.exp(np.ones(np.size(TT))*growth_rate * TT),linewidth=lw)
-                #plt.semilogy(np.array(TT)*wp,np.abs(dEE),linewidth=lw)
-            else:
-                plt.semilogy(np.array(TT)*wp,np.min(EE)*np.exp(np.ones(np.size(TT))*growth_rate * TT),linewidth=lw)
-            #end if
-            plt.title('$E^{2}$, Implicit')
-            plt.ylabel(r'$E^{2}$ [$\frac{V^{2}}{m^{2}}$]')
-            plt.xlabel(r'$t$ [$\omega_{p}^{-1}$]')
-            plt.legend([r'$E^{2}$','Theoretical'])
-            plt.draw()
-            plt.savefig('plots/e2_'+str(t))
-            plt.pause(0.0001)
-
-            fig6 = plt.figure(6)
+            fig6 = plt.figure(1)
             plt.clf()
             ax = fig6.subplots(2, 2)
             ax[0,0].hist2d( x0, v0/np.sqrt(kBTe/me), bins=(100,50), range=[[0.0, L],[-Vmax, Vmax]], norm=mpl.colors.PowerNorm(0.8))
@@ -772,7 +734,7 @@ def explicit_pic(T, nplot):
             plt.yticks([-Vmax, -Vmax/2.0, 0.0, Vmax/2.0, Vmax])
             plt.draw()
             plt.savefig('plots/ps_'+str(t))
-            plt.pause(0.0001)
+            #plt.pause(0.0001)
 
             plt.figure(2)
             plt.clf()
@@ -781,8 +743,8 @@ def explicit_pic(T, nplot):
             plt.title('Current, Implicit')
             plt.xlabel('$x$ [$m$]')
             plt.ylabel(r'$J$ [$\frac{A}{m^{2}}$]')
-            plt.draw()
-            plt.pause(0.0001)
+            #plt.draw()
+            #plt.pause(0.0001)
 
             plt.figure(3)
             plt.clf()
@@ -791,9 +753,9 @@ def explicit_pic(T, nplot):
             plt.xlabel('$x$ [$m$]')
             plt.ylabel(r'$E$ [$\frac{V}{m}$]')
             plt.title('Electric Field, Implicit')
-            plt.draw()
+            #plt.draw()
             plt.savefig('plots/e_'+str(t))
-            plt.pause(0.0001)
+            #plt.pause(0.0001)
 
             plt.figure(4)
             plt.clf()
@@ -801,8 +763,8 @@ def explicit_pic(T, nplot):
             plt.xlabel(r't [$\omega_{p}^{-1}$]')
             plt.ylabel('$KE$ [$J$]')
             plt.title('Total Energy, Implicit')
-            plt.draw()
-            plt.pause(0.0001)
+            #plt.draw()
+            #plt.pause(0.0001)
 
             plt.figure(5)
             plt.clf()
@@ -816,9 +778,9 @@ def explicit_pic(T, nplot):
             plt.ylabel(r'$E^{2}$ [$\frac{V^{2}}{m^{2}}$]')
             plt.xlabel(r'$t$ [$\omega_{p}^{-1}$]')
             plt.legend([r'$E^{2}$','Theoretical'])
-            plt.draw()
+            #plt.draw()
             plt.savefig('plots/e2_'+str(t))
-            plt.pause(0.0001)
+            #plt.pause(0.0001)
             #end if
         #end for t
     np.savetxt('plots/E2.txt',EE)
@@ -862,7 +824,7 @@ def main(T,nplot):
     #Kp = 1
     #N = 1000000
     #Ng = 50
-    #dt = 1e-6
+    #dt = 1e-5
     #Ti = 0.1 * 11600.
     #Te = 0.1 * 11600.
     #L = 30.0 * np.sqrt(kb*Te * epsilon0/e/e/density)
@@ -870,21 +832,21 @@ def main(T,nplot):
     #landau-damping best params
     system = 'landau-damping'
     density = 1e5 # [1/m3]
-    perturbation = 0.1
+    perturbation = 0.4
     Kp = 1
     N =  1000000
-    Ng = 100
+    Ng = 200
     dt = 1e-5 #[s]
     Ti = 0.1 * 11600. #[K]
     Te = 100.0 * 11600. #[K]
     L = 22.0 *  np.sqrt(kb*Te * epsilon0 / e / e / density)
-    Vmax = 6.0
+
+    Vmax = 8.0
     Nv = Ng/2
-    tol = 1e-6
+    tol = 1e-3
     maxiter = 20
 
     EE_i = implicit_pic(T,nplot,system,density,perturbation,Kp,N,Ng,Nv,Vmax,dt,Ti,Te,L,tol,maxiter)
-
 #end def main
 
 if __name__ == '__main__':
