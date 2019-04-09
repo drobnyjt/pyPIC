@@ -14,7 +14,7 @@ me = 9.11e-31
 kb = 1.38e-23
 
 class Particle:
-    def __init__(self, m, q, p2c, T, grid):
+    def __init__(self, m, q, p2c, T, B=[0.,0.,0.], grid=None):
         self.r = np.empty(7)
         self.q = q
         self.m = m
@@ -27,14 +27,23 @@ class Particle:
         #6D mode: 0
         #GC mode: 1
         self.E = 0.0
+        self.B = B
         #Electric field at particle position
-        self.initialize_6D(grid)
+        if grid != None: self.initialize_6D(grid)
     #end def __init__
 
+    def __repr__(self):
+        return f"Particle({self.m}, {self.q}, {self.p2c}, {self.T})" #.format(**locals())
+    #end def
+
+    def get_speed(self):
+        return np.sqrt(self.r[3]**2 + self.r[4]**2 + self.r[5]**2)
+    #end def get_speed
+
     def initialize_6D(self, grid):
-        #self.r[0:3] = np.random.normal(0.0, grid.length/8.0)%(grid.length+grid.dx)
         self.r[0:3] = np.random.uniform(0.0, grid.length)
-        self.r[3:6] = np.random.normal(0.0, self.vth / np.sqrt(2), 3)
+        self.r[1:3] = 0.0
+        self.r[3:6] = np.random.normal(0.0, self.vth , 3)
         self.r[6] = 0.0
     #end def initialize_6D
 
@@ -42,24 +51,41 @@ class Particle:
         index = int(np.floor(self.r[0]/grid.dx))
         w_r = (self.r[0] % grid.dx) / grid.dx
         w_l = 1.0 - w_r
-        if(index+1>=200):
-            print(self.r[0])
-        #end if
         self.E = w_l*grid.E[index] + w_r*grid.E[(index+1)]
     #end def interpolate_electric_field
 
     def push_6D(self,dt):
-        self.r[3] += (self.q/self.m)*(dt*0.5)*self.E
-        self.r[4] += 0.0
-        self.r[5] += 0.0
+        constant = 0.5*dt*self.q/self.m
+
+        self.r[3] += constant*self.E
+        self.r[4] += 0.
+        self.r[5] += 0.
+
+        tx = constant*self.B[0]
+        ty = constant*self.B[1]
+        tz = constant*self.B[2]
+
+        t2 = tx*tx + ty*ty + tz*tz
+
+        sx = 2.*tx/(1. + t2)
+        sy = 2.*ty/(1. + t2)
+        sz = 2.*tz/(1. + t2)
+
+        vfx = self.r[3] + self.r[4]*tz - self.r[5]*ty
+        vfy = self.r[4] + self.r[5]*tx - self.r[3]*tz
+        vfz = self.r[5] + self.r[3]*ty - self.r[4]*tx
+
+        self.r[3] += vfy*sz - vfz*sy
+        self.r[4] += vfz*sx - vfx*sz
+        self.r[5] += vfx*sy - vfy*sx
+
+        self.r[3] += constant*self.E
+        self.r[4] += 0.
+        self.r[5] += 0.
 
         self.r[0] += self.r[3]*dt
         self.r[1] += self.r[4]*dt
         self.r[2] += self.r[5]*dt
-
-        self.r[3] += (self.q/self.m)*(dt*0.5)*self.E
-        self.r[4] += 0.0
-        self.r[5] += 0.0
 
         self.r[6] += dt
     #end push_6D
@@ -70,7 +96,8 @@ class Particle:
 
     def apply_BCs_dirichlet(self, grid):
         if self.r[0] <= 0.0 or self.r[0] > grid.length:
-            self.r[0:3] = np.random.uniform(grid.length/4.0, 3.0*grid.length/4.0)
+            self.r[0] = np.random.uniform(grid.length/4.0, 3.0*grid.length/4.0)
+            self.r[1:3] = 0.0
             self.r[3:6] = np.random.normal(0.0, self.vth / np.sqrt(2), 3)
         #end if
     #end def apply_BCs_dirichlet
@@ -92,10 +119,17 @@ class Grid:
         self.fill_laplacian_dirichlet()
     #end def __init__
 
+    def __repr__(self):
+        return f"Grid({self.ng}, {self.length}, {self.Te})"
+    #end def __repr__
+
+    def __len__(self):
+        return int(self.ng)
+    #end def __len__
 
     def weight_particles_to_grid(self, particles):
-        self.rho = self.rho * 0.0
-        self.n = self.n * 0.0
+        self.rho[:] = 0.0
+        self.n[:] = 0.0
 
         for particle in particles:
             index_l = int(np.floor(particle.r[0]/self.dx))
@@ -184,28 +218,28 @@ class Grid:
         iter = 0
 
         phi = self.phi
-    	dx2 = self.dx*self.dx
-    	c0 = self.rho[self.ng//2]/epsilon0
-    	c1 = e/kb/self.Te
-    	c2 = self.rho/epsilon0
+        dx2 = self.dx*self.dx
+        c0 = self.rho[self.ng//2]/epsilon0
+        c1 = e/kb/self.Te
+        c2 = self.rho/epsilon0
         D = np.zeros((self.ng, self.ng))
 
-    	while (residual > tolerance) & (iter < iter_max):
-    		F = self.A.dot(phi) - dx2*c0*np.exp(c1*(phi-phi[self.ng/2])) + dx2*c2
-    		F[0] = phi[0]
-    		F[-1] = phi[-1]
+        while (residual > tolerance) & (iter < iter_max):
+            F = self.A.dot(phi) - dx2*c0*np.exp(c1*(phi-phi[self.ng//2])) + dx2*c2
+            F[0] = phi[0]
+            F[-1] = phi[-1]
 
-    		np.fill_diagonal(D, -dx2*c0*c1*np.exp(c1*(phi-phi[self.ng/2]) ))
-    		D[0,0] = -dx2*c0*c1
-    		D[-1,-1] = -dx2*c0*c1
+            np.fill_diagonal(D, -dx2*c0*c1*np.exp(c1*(phi-phi[self.ng//2]) ))
+            D[0,0] = -dx2*c0*c1
+            D[-1,-1] = -dx2*c0*c1
 
-    		J = spp.csc_matrix(self.A + D)
-    		dphi = sppla.inv(J).dot(F)
+            J = spp.csc_matrix(self.A + D)
+            dphi = sppla.inv(J).dot(F)
 
-    		phi = phi - dphi
-    		residual = la.norm(dphi)
-    		iter += 1
-    	#end while
+            phi = phi - dphi
+            residual = la.norm(dphi)
+            iter += 1
+        #end while
         self.phi = phi - np.min(phi)
         print(residual)
     #end def solve_for_phi_dirichlet
@@ -214,28 +248,32 @@ class Grid:
 def main():
     density = 1e10
     N = 10000
-    T = 1000
+    T = 200
     ng = 200
     dt_small = 1e-6
     dt_large = 1e-5
-    Ti = 1.0*11600.
+    Ti = 0.01*11600.
     Te = 1.0*11600.
     LD = np.sqrt(kb*Te*epsilon0/e/e/density)
     L = 100.0*LD
     p2c = L*density/N
+    B = [1.0, 0.0, 0.0]
 
-    fig1 = plt.figure(1)
-    plt.ion()
+    #fig1 = plt.figure(1)
+    #plt.ion()
     fig2 = plt.figure(2)
     plt.ion()
 
     grid = Grid(ng, L, Te)
-    particles = [Particle(mp, e, p2c, Ti, grid) for i in range(N)]
+    particles = [Particle(mp, e, p2c, Ti, B=B, grid=grid) for i in range(N)]
 
-    positions = np.zeros(N)
+    file = open("particle_output.txt","w+")
+    positions_x = np.zeros(N)
+    positions_y = np.zeros(N)
+    positions_z = np.zeros(N)
+    test_particle = np.zeros((3, T))
     velocities = np.zeros(N)
     colors = np.zeros(N)
-
 
     time = 0.0
     for time_index in range(T):
@@ -244,30 +282,39 @@ def main():
         grid.weight_particles_to_grid(particles)
         grid.solve_for_phi_dirichlet_boltzmann()
         grid.differentiate_phi_to_E_dirichlet()
+
         for particle_index, particle in enumerate(particles):
-            positions[particle_index] = particle.r[0]
+
+            positions_x[particle_index] = particle.r[0]
+            positions_y[particle_index] = particle.r[1]
+            positions_z[particle_index] = particle.r[2]
+
+            if particle_index%100==0:
+                print(f'{particle.r[0]}, {particle.r[1]}, {particle.r[2]}', file=file)
+            #end if
+
             velocities[particle_index] = particle.r[3]/particle.vth
-            colors[particle_index] = particle.r[6]
+            colors[particle_index] = particle.get_speed()
 
             particle.interpolate_electric_field(grid)
 
-
-            if (particle.r[0] <= 20*LD or particle.r[0] >= 80*LD) and particle.r[6]<=time:
-                particle.push_6D(dt_small)
+            #if (particle.r[0] <= 20*LD or particle.r[0] >= 80*LD) and particle.r[6]<=time:
+            #    particle.push_6D(dt_small)
             #end if
-            if (particle.r[0] > 20*LD and particle.r[0] < 80*LD) and particle.r[6]<=time:
-                particle.push_6D(dt_large)
+            #if (particle.r[0] > 20*LD and particle.r[0] < 80*LD) and particle.r[6]<=time:
+            #    particle.push_6D(dt_large)
             #end if
 
-            #particle.push_6D(dt_small)
+            particle.push_6D(dt_small)
 
             particle.apply_BCs_dirichlet(grid)
         #end for
-        plt.figure(1)
-        plt.clf()
-        plt.scatter(positions, velocities,s=1.0,c=colors)
-        plt.draw()
-        plt.pause(0.001)
+
+        #plt.figure(1)
+        #plt.clf()
+        #plt.scatter(positions_y, positions_z, s=1.0, c=colors)
+        #plt.draw()
+        #plt.pause(0.001)
         #plt.savefig('ps_'+str(time_index))
 
         plt.figure(2)
@@ -275,11 +322,12 @@ def main():
         plt.plot(grid.domain, grid.phi)
         plt.draw()
         plt.pause(0.001)
-        #plt.savefig('phi_'+str(time_index))
+        plt.savefig('phi_'+str(time_index))
     #end for
+    plt.show()
 
-    c.convert('.','ps',0,T,1,'out.gif')
-    c.convert('.','phi',0,T,1,'out.gif')
+    #c.convert('.','ps',0,T,1,'out.gif')
+    #c.convert('.','phi',0,T,1,'out.gif')
 
 #end def main
 
