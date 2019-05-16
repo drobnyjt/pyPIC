@@ -8,7 +8,6 @@ import scipy.sparse as spp
 import scipy.sparse.linalg as sppla
 import convert as c
 import itertools
-#import generate_ftridyn_input as gen
 
 epsilon0 = 8.854e-12
 e = 1.602e-19
@@ -29,11 +28,11 @@ def particle_from_energy_angle_coordinates(energy, ca, cb, cg, m, Z,
         cg (float): directional cosine along z-axis, range 0. to 1.
         m (float): particle mass in kg
         Z (int): particle atomic number
-        B (:obj: 'np.ndarray'), optional: magnetic field (assumed zero)
+        B (ndarray), optional: magnetic field (assumed zero)
         q (float), optional: particle charge (assumed 1 fundamental charge)
         p2c (int), optional: assumed zero (i.e., chargeless tracer)
         T (float), optional: species temperature (assumed zero)
-        grid (:obj: 'Grid'), optional: grid associated with particle, assumed
+        grid (Grid), optional: grid associated with particle, assumed
             None
         x0 (float), optional: starting position along x-axis (assumed zero)
         time (float), optional: particle's current time (assumed zero)
@@ -44,8 +43,8 @@ def particle_from_energy_angle_coordinates(energy, ca, cb, cg, m, Z,
     u /= np.linalg.norm(u)
     v = speed * u
     particle = Particle(m*mp, q, p2c, T, Z, grid=grid)
-    particle.v = v
-    particle.x = x0
+    particle.r[3:6] = v
+    particle.r[0] = x0
     particle.time = time
     particle.B[:] = B
     return particle
@@ -70,9 +69,9 @@ class Particle:
                 particle. Should be > 1 except for tracers when p2c = 0.
             T (float): species temperature in K
             Z (int): species atomic number
-            B0 (:obj: 'np.ndarray'): magnetic field vector (assumed zero)
-            E0 (:obj: 'np.ndarray'): electric field vector (assumed zero)
-            grid (:obj: 'Grid'), optional: grid object associated with this
+            B0 (ndarray): magnetic field vector (assumed zero)
+            E0 (ndarray): electric field vector (assumed zero)
+            grid (Grid), optional: grid object associated with this
                 particle (assumed None)
         '''
         self.r = np.zeros(7)
@@ -82,8 +81,8 @@ class Particle:
         self.T = T
         self.p2c = p2c
         self.vth = np.sqrt(2.0*kb*self.T/self.m)
-        #6D mode: q = x,y,z,vx,vy,vz,t
-        #GC mode: q = X,Y,Z,vpar,mu,_,t
+        #6D mode: q = x, y, z, vx, vy, vz, t
+        #GC mode: q = X, Y, Z, vpar, mu, _, t
         self.mode = 0
         #6D mode: 0
         #GC mode: 1
@@ -112,28 +111,64 @@ class Particle:
     @property
     def speed(self):
         '''
-        Returns the particle's speed.
+        Returns the particle's total speed.
 
         Tests:
 
-        >>> particle=Particle(1.0, 1.0, 1.0, 1.0, 1)
-        >>> particle.r[3]=1.0
-        >>> particle.r[4:6]=2.0
+        >>> particle = Particle(1.0, 1.0, 1.0, 1.0, 1)
+        >>> particle.r[3] = 1.0
+        >>> particle.r[4:6] = 2.0
         >>> particle.speed
         3.0
         '''
         return np.sqrt(self.r[3]**2 + self.r[4]**2 + self.r[5]**2)
     #end def speed
 
+    @speed.setter
+    def speed(self, speed):
+        '''
+        Scales the particle's speed to the given speed retaining direction.
+
+        Args:
+            speed (float): new speed to scale to.
+
+        Tests:
+            >>> particle = Particle(1.0, 1.0, 1.0, 1.0, 1)
+            >>> particle.r[3] = 1.0
+            >>> particle.speed = 2.0
+            >>> particle.speed
+            2.0
+        '''
+        u = self.v / np.linalg.norm(self.v)
+        self.v = u*speed
+    #end def speed
+
     @property
     def x(self):
         '''
-        Returns the particle's x positions.
+        Returns the particle's x position.
 
         Returns:
             x (float): x position
         '''
         return self.r[0]
+    #end def x
+
+    @x.setter
+    def x(self, x0):
+        '''
+        Allows the setting of r[0] with the .x accsessor
+
+        Notes:
+            Can be used in either GC or 6D mode.
+
+        Tests:
+            >>> particle = Particle(1.0, 1.0, 1.0, 1.0, 1)
+            >>> particle.x = 10.0
+            >>> particle.r[0]
+            10.0
+        '''
+        self.r[0] = x0
     #end def x
 
     @property
@@ -146,6 +181,21 @@ class Particle:
         '''
         return self.r[3]
     #end def v_x
+
+    @v_x.setter
+    def v_x(self, v_x):
+        self.r[3] = v_x
+    #end def v_x
+
+    @property
+    def v(self):
+        return self.r[3:6]
+    #end def v
+
+    @v.setter
+    def v(self, v0):
+        self.r[3:6] = v0
+    #end def
 
     def get_angle_wrt_wall(self, use_degrees=True):
         '''
@@ -204,7 +254,7 @@ class Particle:
         based on its thermal velocity.
 
         Args:
-            grid (:obj: 'Grid'): the grid with which the particle is
+            grid (Grid): the grid with which the particle is
                 associated
 
         Tests:
@@ -226,24 +276,13 @@ class Particle:
         self.r[6] = 0.0
     #end def initialize_6D
 
-    def shift_x_velocity_distribution(self, u):
-        '''
-        Shift's the particle's velocity by the mean velocity u.
-
-        Args:
-            u (float): mean of velocity distribution (i.e., flow speed)
-        '''
-
-        self.r[3] += u
-    #end def shift_x_velocity_distribution
-
     def set_x_direction(self, direction):
         '''
         Set the direction of the particle by taking the absolute value of its
         x-velocity and, if necessary, negating it.
 
         Args:
-            direction (:obj: 'str'): 'left' or 'right'
+            direction (str): 'left' or 'right'
         '''
         if direction.lower() == 'left':
             self.r[3] = -abs(self.r[3])
@@ -262,7 +301,7 @@ class Particle:
         assuming Dirichlet-Dirichlet boundary conditions.
 
         Args:
-            grid (:obj: 'Grid'): the grid with which the particle is
+            grid (Grid): the grid with which the particle is
                 associated
 
         Tests:
@@ -288,6 +327,16 @@ class Particle:
 
         Args:
             dt (float): timestep
+
+        Tests:
+            >>> particle = Particle(1.0, 1.0, 1.0, 1.0, 1)
+            >>> grid = Grid(100, 1.0, 1.0)
+            >>> particle._initialize_6D(grid)
+            >>> particle.r[3:6] = 0.0
+            >>> grid.E[0] = 1.0
+            >>> particle.push_6D(1.0)
+            >>> particle.r[3]
+            1.0
         '''
         constant = 0.5*dt*self.q/self.m
 
@@ -329,6 +378,21 @@ class Particle:
         Transform the particle state vector from 6D to guiding-center
         coordinates. This process results in the loss of one coordinate
         which represents the phase of the particle.
+
+        Tests:
+            Tests that vpar and total speed are conserved in transforming.
+            >>> particle = Particle(1.0, 1.0, 1.0, 1.0, 1)
+            >>> particle.B[:] = np.random.uniform(0.0, 1.0, 3)
+            >>> grid = Grid(100, 1.0, 1.0e9)
+            >>> v_x = particle.r[3]
+            >>> speed = particle.speed
+            >>> particle._initialize_6D(grid)
+            >>> particle.transform_6D_to_GC()
+            >>> particle.transform_GC_to_6D()
+            >>> round(v_x,6) == round(particle.r[3],6)
+            True
+            >>> round(speed,6) == round(particle.speed,6)
+            True
         '''
         x = self.r[0:3]
         v = self.r[3:6]
@@ -358,6 +422,21 @@ class Particle:
         Transform the particle state vector from guiding-center to 6D
         coordinates. This method uses a single random number to generate the
         missing phase information from the GC coordinates.
+
+        Tests:
+            Tests that vpar and total speed are conserved in transforming.
+            >>> particle = Particle(1.0, 1.0, 1.0, 1.0, 1)
+            >>> particle.B[:] = np.random.uniform(0.0, 1.0, 3)
+            >>> grid = Grid(100, 1.0, 1.0e9)
+            >>> v_x = particle.r[3]
+            >>> speed = particle.speed
+            >>> particle._initialize_6D(grid)
+            >>> particle.transform_6D_to_GC()
+            >>> particle.transform_GC_to_6D()
+            >>> round(v_x,6) == round(particle.r[3],6)
+            True
+            >>> round(speed,6) == round(particle.speed,6)
+            True
         '''
         X = self.r[0:3]
         vpar_mag = self.r[3]
@@ -407,7 +486,7 @@ class Particle:
         for the equation of motion given to the RK4 guiding-center solver.
 
         Args:
-            r (:obj: 'np.ndarray'): particle state vector in GC coordinates
+            r (ndarray): particle state vector in GC coordinates
         '''
         B2 = self.B[0]**2 + self.B[1]**2 + self.B[2]**2
 
@@ -418,7 +497,7 @@ class Particle:
         wc = abs(self.q)*np.sqrt(B2)/self.m
         rho = r[3]/wc
 
-        rdot = np.empty(7)
+        rdot = np.zeros(7)
 
         rdot[0] = (self.E[1]*self.B[2] - self.E[2]*self.B[1])/B2 + r[3]*b0
         rdot[1] = (self.E[2]*self.B[0] - self.E[0]*self.B[2])/B2 + r[3]*b1
@@ -435,6 +514,20 @@ class Particle:
     def apply_BCs_periodic(self, grid):
         '''
         Wrap particle x-coordinate around for periodic BCs.
+
+        Args:
+            grid (Grid): grid object with which the particle is associated.
+
+        Tests:
+            >>> particle = Particle(1.0, 1.0, 1.0, 1.0, 1)
+            >>> grid = Grid(5, 1.0, 1.0)
+            >>> particle._initialize_6D(grid)
+            >>> particle.r[0] = grid.length*1.5
+            >>> particle.apply_BCs_periodic(grid)
+            >>> particle.is_active()
+            True
+            >>> particle.r[0] == grid.length*0.5
+            True
         '''
         self.r[0] = self.r[0]%(grid.length)
     #end def apply_BCs
@@ -443,8 +536,20 @@ class Particle:
         '''
         Set particle to inactive when it's x-coordinate exceeds either wall in a
         dirichlet-dirichlet boundary condition case.
+
+        Args:
+            grid (Grid): grid object with which the particle is associated
+
+        Tests:
+            >>> particle = Particle(1.0, 1.0, 1.0, 1.0, 1)
+            >>> grid = Grid(5, 1.0, 1.0)
+            >>> particle._initialize_6D(grid)
+            >>> particle.r[0] = grid.length + 1.0
+            >>> particle.apply_BCs_dirichlet(grid)
+            >>> particle.is_active()
+            False
         '''
-        if (self.x <= 0.0) or (self.x >= grid.length):
+        if (self.r[0] <= 0.0) or (self.r[0] >= grid.length):
             self.active = 0
         #end if
     #end def apply_BCs_dirichlet
@@ -458,9 +563,9 @@ class Particle:
         reactivation.
 
         Args:
-            distribution (:obj: 'generator'): a generator that returns a
+            distribution (iterable): an iterable that returns a
                 6-vector that overwrites the particle's coordinates
-            grid (:obj: 'Grid'): the grid object with which the particle is
+            grid (Grid): the grid object with which the particle is
                 associated
             time (float): the particle's current time
             p2c (float): the ratio of computational to real particles
@@ -479,83 +584,28 @@ class Particle:
     #end def reactivate
 #end class Particle
 
-def thompson_distribution_isotropic_6D(SBV, mass, grid, mfp):
-    while True:
-        r = np.empty(7)
-        wall = np.random.choice([1, -1])
-        if wall == -1:
-            r[0] = grid.length - mfp
-        elif wall == 1:
-            r[0] = mfp
-        #end if
-        r[1:3] = 0.0
-        rand = np.random.uniform(0., 1.)
-        alpha, beta, gamma = np.random.uniform(0., np.pi/2., 3)
-        energy = -SBV*np.sqrt(rand)/(np.sqrt(rand) - 1.)*e
-        velocity = np.sqrt(2.*energy/mass)
-        u = np.array([np.cos(alpha), np.cos(beta), np.cos(gamma)])
-        u[0] = wall*abs(u[0])
-        u /= np.linalg.norm(u)
-        v = u*velocity
-        r[3:6] = v
-        yield r
-    #end while
-#end def thompson_distribution_isotropic_6D
-
-def distribution_from_list(new_particle_list, grid, x0):
-    index = 0
-    while True:
-        r = np.zeros(7)
-        particle_state = new_particle_list[index]
-        energy = particle_state[0]
-        u = particle_state[1:4]
-        if np.random.choice((True, False)):
-            u[0] = abs(u[0])
-            r[0] = x0
-        else:
-            u[0] = -abs(u[0])
-            r[0] = grid.length - x0
-        #end if
-        mass = particle_state[4]
-        u /= np.linalg.norm(u)
-        speed = np.sqrt(2.*energy*e/(mass*mp))
-        v = speed * u
-        r[3:6] = v
-        yield r
-        index = (index+1)%len(new_particle_list)
-    #end while
-#end def distribution_from_list
-
-def distribution_from_file(filename, mass, grid, mfp):
-    file = open(filename, 'r')
-    #WRITE(IOUT7,259)FLUCA,LABEL(IREC1,2),ESP,XR(IREC1,2),YR(IREC1,2),ZR(IREC1,2),CXSP,CYSP,CZSP,SBE(LABEL(IREC1,2))
-    lines = file.readlines()
-    num_lines = len(lines)
-    index = 0
-    while True:
-        line = lines[index%num_lines]
-        r = np.empty(7)
-        direction = np.random.choice((1, -1))
-        if direction == 1:
-            r[0] = 0.0 + mfp
-        else:
-            r[0] = grid.length - mfp
-        r[1:3] = 0.
-        line = line.split()
-        energy = float(line[2])*e #Convert to J
-        velocity = np.sqrt(2.*energy/mass)
-        u = np.array([float(line[6]), float(line[7]), float(line[8])])
-        u[0] = direction*abs(u[0])
-        u /= np.linalg.norm(u)
-        v = u*velocity
-        r[3:6] = v
-        print(f'Sputtered Energy: {energy/e}')
-        index += 1
-        yield r
-    #end while
-#end def distribution_from_file
-
 def source_distribution_6D(grid, Ti, mass):
+    '''
+    This generator produces an iterable that samples from a Maxwell-
+    Boltzmann distribution for a given temperature and mass for velocities, and
+    uniformly samples the grid for positions. y and z positions are started as
+    0.0.
+
+    Args:
+        grid (Grid): grid object where the particles will be (re)initialized
+        Ti (float): temperature of species being sampled
+        mass (float): mass of species being sampled
+
+    Yields:
+        r (ndarray): 7-element particle coordinate array in 6D coordinates
+
+    Tests:
+        >>> grid = Grid(100, 1.0, 1.0)
+        >>> distribution = source_distribution_6D(grid, 1.0, 1.0)
+        >>> r = next(distribution)
+        >>> 0.0 < r[0] < 1.0
+        True
+    '''
     while True:
         vth = np.sqrt(2.0*kb*Ti/mass)
         r = np.empty(7)
@@ -566,22 +616,12 @@ def source_distribution_6D(grid, Ti, mass):
     #end while
 #end def source_distribution_6D
 
-def flux_source_distribution_6D(grid, Ti, mass, flux):
-    while True:
-        vth = np.sqrt(2.0*kb*Ti/mass)
-        r = np.empty(7)
-        r[0] = grid.length - np.random.uniform(0.0, 1.0)*grid.dx
-        r[1:3] = 0.
-        r[3:6] = np.random.normal(0.0, vth, 3)
-        r[3] = r[3] + flux
-        yield r
-    #end while
-#end def source_distribution_6D
-
 class Grid:
-    def __init__(self, ng, length, Te):
+    def __init__(self, ng, length, Te, bc='dirichlet-dirichlet'):
         self.ng = ng
+        assert self.ng > 1, 'Number of grid points must be greater than 1'
         self.length = length
+        assert self.length > 0.0, 'Length must be greater than 0'
         self.domain = np.linspace(0.0, length, ng)
         self.dx = self.domain[1] - self.domain[0]
         self.rho = np.zeros(ng)
@@ -593,7 +633,16 @@ class Grid:
         self.Te = Te
         self.ve = np.sqrt(8./np.pi*kb*self.Te/me)
         self.added_particles = 0
-        self._fill_laplacian_dirichlet()
+        self.bc = bc
+        if bc == 'dirichlet-dirichlet':
+            self._fill_laplacian_dirichlet()
+        elif bc == 'dirichlet-neumann':
+            self._fill_laplacian_dirichlet_neumann()
+            print(self.A)
+        elif type(bc) != 'str':
+            raise TypeError('bc must be a string')
+        else:
+            raise ValueError('Unimplemented boundary condition. Choose dirichlet_dirichlet or dirichlet_neumann')
     #end def __init__
 
     def __repr__(self):
@@ -605,10 +654,56 @@ class Grid:
     #end def __len__
 
     def copy(self):
+        '''
+        Copies a Grid object.
+
+        Returns:
+            grid (Grid): An equally-initialized Grid object.
+
+        Notes:
+            copy() will not copy weighting or other post-initialization
+            calculations.
+
+        Tests:
+            >>> grid1 = Grid(2, 1.0, 1.0)
+            >>> grid2 = grid1.copy()
+            >>> grid1 == grid2
+            False
+            >>> grid1.ng == grid2.ng
+            True
+            >>> (grid1.A == grid2.A).all()
+            True
+        '''
         return Grid(self.ng, self.length, self.Te)
     #end def copy
 
-    def weight_particles_to_grid_boltzmann(self, particles,dt):
+    def weight_particles_to_grid_boltzmann(self, particles, dt):
+        '''
+        Weight particle densities and charge densities to the grid using a first
+        order weighting scheme.
+
+        Args:
+            particles (list of Particles): list of particle objects
+            dt (float): timestep; used for Boltzmann electron reference density
+                update
+
+        Tests:
+            This test makes sure that particles are weighted correctly.
+            >>> particle = Particle(1.0, 1.0, 1.0, 1.0, 1)
+            >>> grid = Grid(101, 1.0, 1.0)
+            >>> particle._initialize_6D(grid)
+            >>> particle.x = 0.0
+            >>> particle.r[0]
+            0.0
+            >>> particles = [particle]
+            >>> grid.weight_particles_to_grid_boltzmann(particles, 1.0)
+            >>> grid.n[0]
+            100.0
+            >>> particles[0].x = 1.0 - grid.dx/2
+            >>> grid.weight_particles_to_grid_boltzmann(particles, 1.0)
+            >>> round(grid.n[-1],6)
+            50.0
+        '''
         self.rho[:] = 0.0
         self.n[:] = 0.0
 
@@ -646,6 +741,30 @@ class Grid:
     #end def weight_particles_to_grid
 
     def differentiate_phi_to_E_dirichlet(self):
+        '''
+        Find electric field on the grid from the negative differntial of the
+        electric potential.
+
+        Notes:
+            Uses centered difference for interior nodes:
+
+                d phi   phi[i+1] - phi[i-1]
+            E = _____ ~ ___________________
+                 dx            2 dx
+
+            And forward difference for boundaries.
+
+        Tests:
+            >>> grid = Grid(6, 5.0, 1.0)
+            >>> grid.phi[:] = 1.0
+            >>> grid.differentiate_phi_to_E_dirichlet()
+            >>> abs(grid.E)
+            array([0., 0., 0., 0., 0., 0.])
+            >>> grid.phi[:] = np.linspace(0.0, 1.0, 6)
+            >>> grid.differentiate_phi_to_E_dirichlet()
+            >>> grid.E
+            array([-0.2, -0.2, -0.2, -0.2, -0.2, -0.2])
+        '''
         for i in range(1,self.ng-1):
             self.E[i] = -(self.phi[i + 1] - self.phi[i - 1])/self.dx/2.
         #end for
@@ -654,6 +773,10 @@ class Grid:
     #end def differentiate_phi_to_E
 
     def _fill_laplacian_dirichlet(self):
+        '''
+        Internal method that creates the Laplacian matrix used to solve for the
+        electric potential in dirichlet-dirichlet BCs.
+        '''
         ng = self.ng
 
         self.A = np.zeros((ng,ng))
@@ -669,6 +792,10 @@ class Grid:
     #end def fill_laplacian_dirichlet
 
     def _fill_laplacian_dirichlet_neumann(self):
+        '''
+        Internal method that creates the Laplacian matrix used to solve for the
+        electric potential in dirichlet-neumann BCs.
+        '''
         ng = self.ng
 
         self.A = np.zeros((ng, ng))
@@ -686,13 +813,53 @@ class Grid:
         self.A[-1,-3] = 1.
     #end def
 
+    def solve_for_phi(self):
+        if self.bc == 'dirichlet-dirichlet':
+            self.solve_for_phi_dirichlet_boltzmann()
+        elif self.bc == 'dirichlet-neumann':
+            self.solve_for_phi_dirichlet_neumann_boltzmann()
+    #end def solve_for_phi
+
+    def solve_for_phi_dirichlet(self):
+        '''
+        Solves Del2 phi = rho.
+
+        Tests:
+            >>> grid = Grid(5, 4.0, 1.0)
+            >>> grid.rho[:] = np.ones(5)
+            >>> grid.solve_for_phi_dirichlet()
+            >>> list(grid.phi)
+            [0.0, 1.5, 2.0, 1.5, 0.0]
+        '''
+        dx2 = self.dx*self.dx
+        phi = np.zeros(self.ng)
+        A = spp.csc_matrix(self.A)
+        phi[:] = -sppla.inv(A).dot(self.rho)*dx2
+        self.phi = phi - np.min(phi)
+    #end def solve_for_phi_dirichlet
+
     def solve_for_phi_dirichlet_boltzmann(self):
+        '''
+        Solves for the electric potential from the charge density using
+        Boltzmann (AKA adiabatic) electrons assuming dirichlet-dirichlet BCs.
+
+        Tests:
+            Tests are hard to write for the boltzmann solver. This one just
+            enforces zero electric potential in a perfectly neutral plasma.
+            >>> grid = Grid(5, 4.0, 1.0)
+            >>> grid.n0 = 1.0/e*epsilon0
+            >>> grid.rho[:] = np.ones(5)
+            >>> grid.n[:] = np.ones(5)/e*epsilon0
+            >>> grid.solve_for_phi_dirichlet_boltzmann()
+            >>> grid.phi
+            array([0., 0., 0., 0., 0.])
+        '''
         residual = 1.0
-        tolerance = 1e-3
+        tolerance = 1e-9
         iter_max = 100
         iter = 0
 
-        phi = self.phi
+        phi = np.zeros(self.ng)
         D = np.zeros((self.ng, self.ng))
 
         dx2 = self.dx*self.dx
@@ -721,6 +888,21 @@ class Grid:
     #end def solve_for_phi_dirichlet
 
     def solve_for_phi_dirichlet_neumann_boltzmann(self):
+        '''
+        Solves for the electric potential from the charge density using
+        Boltzmann (AKA adiabatic) electrons assuming dirichlet-neumann BCs.
+
+        Tests:
+            Tests are hard to write for the boltzmann solver. This one just
+            enforces zero electric potential in a perfectly neutral plasma.
+            >>> grid = Grid(5, 4.0, 1.0)
+            >>> grid.n0 = 1.0/e*epsilon0
+            >>> grid.rho[:] = np.ones(5)
+            >>> grid.n[:] = np.ones(5)/e*epsilon0
+            >>> grid.solve_for_phi_dirichlet_neumann_boltzmann()
+            >>> grid.phi
+            array([0., 0., 0., 0., 0.])
+        '''
         residual = 1.0
         tolerance = 1e-3
         iter_max = 100
@@ -763,20 +945,208 @@ class Grid:
     #end def add_particles
 #end class Grid
 
+def pic_iead():
+    import generate_ftridyn_input as gen
+    density = 1e20
+    densities_boron = [1e11, 1e12, 1e12, 1e11, 1e13]
+    N = 10000
+    timesteps = 200
+    ng = 600
+    dt = 1e-10
+    Ti = 15.*11600.
+    Te = 30.*11600.
+    LD = np.sqrt(kb*Te*epsilon0/e/e/density)
+    L = 300.*LD
+    p2c = density*L/N
+    p2cs_boron = [density_boron*L/N for density_boron in densities_boron]
+    alpha = 89.*np.pi/180.
+    B0 = np.array([2.*np.cos(alpha), 2.*np.sin(alpha), 0.])
+    E0 = np.zeros(3)
+    number_histories = 100
+    num_energies = 40
+    num_angles = 40
+
+    phi_floating = (Te/11600.)*0.5*np.log(1.*mp/2./np.pi/me/(1.+Ti/Te))
+    print(f'Floating potential: {phi_floating} V')
+
+    #Initialize objects, generators, and counters
+    grid = Grid(ng, L, Te, bc='dirichlet-dirichlet')
+
+    deuterium = [
+        Particle(2.*mp, e, p2c, Ti, Z=1, B0=B0, E0=E0, grid=grid)
+        for _ in range(N)
+    ]
+
+    boron_1 = [
+        Particle(10.81*mp, e, p2cs_boron[0], Ti, Z=5, B0=B0, E0=E0, grid=grid)
+        for _ in range(N)
+    ]
+
+    boron_2 = [
+        Particle(10.81*mp, 2.*e, p2cs_boron[1], Ti, Z=5, B0=B0, E0=E0, grid=grid)
+        for _ in range(N)
+    ]
+
+    boron_3 = [
+        Particle(10.81*mp, 3.*e, p2cs_boron[2], Ti, Z=5, B0=B0, E0=E0, grid=grid)
+        for _ in range(N)
+    ]
+
+    boron_4 = [
+        Particle(10.81*mp, 4.*e, p2cs_boron[3], Ti, Z=5, B0=B0, E0=E0, grid=grid)
+        for _ in range(N)
+    ]
+
+    boron_5 = [
+        Particle(10.81*mp, 5.*e, p2cs_boron[4], Ti, Z=5, B0=B0, E0=E0, grid=grid)
+        for _ in range(N)
+    ]
+
+    source_distribution = source_distribution_6D(grid, Ti, mp)
+    impurity_distribution = source_distribution_6D(grid, Ti, 10.81*mp)
+
+    particles = deuterium + boron_1 + boron_2 + boron_3 + boron_4 + boron_5
+
+    N = len(particles)
+
+    tridyn_interface_D_B = gen.tridyn_interface('D', 'B')
+    tridyn_interface_B_B = gen.tridyn_interface('B', 'B')
+
+    iead_D = np.zeros((num_energies, num_angles))
+    iead_B = np.zeros((num_energies, num_angles))
+
+    skip = 1
+
+    fig1 = plt.figure(1)
+    fig2 = plt.figure(2)
+    fig3 = plt.figure(3)
+    fig4 = plt.figure(4)
+    #plt.ion()
+
+    #Start of time loop
+    time = 0.
+    for time_index in range(timesteps+1):
+        #Clear iead collection arrays
+        energies_D = []
+        angles_D = []
+        energies_B = []
+        angles_B = []
+        #TODO ADD MORE BORON CHARGE STATES?
+
+        #Clear plotting arrays
+        positions = np.zeros(N)
+        velocities = np.zeros(N)
+        colors = np.zeros(N)
+
+        time += dt
+        grid.weight_particles_to_grid_boltzmann(particles, dt)
+        grid.reset_added_particles()
+        grid.solve_for_phi_dirichlet_boltzmann()
+        grid.differentiate_phi_to_E_dirichlet()
+
+        #Print parameters to command line
+        print(f'timestep: {time_index}')
+        print(f'n0: {grid.n0}\nadded_particles: {grid.added_particles}')
+        print(f'phi_max: {np.max(grid.phi)}')
+
+        #Begin particle loop
+        for particle_index, particle in enumerate(particles):
+            #If particle is active, push particles and store positions, velocities
+            if particle.is_active():
+                #Store particle coordinates for plotting
+                positions[particle_index] = particle.x
+                velocities[particle_index] = particle.v_x
+                colors[particle_index] = particle.q/e
+
+                #Interpolate E, push in time, and apply BCs
+                particle.interpolate_electric_field_dirichlet(grid)
+                particle.push_6D(dt)
+                particle.apply_BCs_dirichlet(grid)
+
+                #If particle is deactivated at wall, store in iead colleciton arrays
+                if not particle.is_active():
+                    if particle.Z == 1:
+                        energies_D.append(particle.kinetic_energy/e)
+                        angles_D.append(particle.get_angle_wrt_wall())
+                    #end if
+                    if particle.Z == 5:
+                        energies_B.append(particle.kinetic_energy/e)
+                        angles_B.append(particle.get_angle_wrt_wall())
+                    #end if
+            #If particle is not active, reinitialize as either source H or impurity B
+            else:
+                if np.random.choice((True, True), p=(1./6., 5./6.)):
+                    particle.reactivate(source_distribution, grid, time, p2c, 1.*mp, 1.*e, 1)
+                else:
+                    charge_state = np.random.choice((1,2,3,4,5))
+                    particle.reactivate(impurity_distribution, grid, time, p2cs_boron[charge_state-1], 10.81*mp, charge_state*e, 5)
+            #end if
+        #end for particle_index, particle
+
+        #Collect iead arrays into 2D IEAD histogram
+        iead_D_temp, energy_range, angle_range = np.histogram2d(energies_D, angles_D, bins=(num_energies, num_angles), range=[[0., 4.*phi_floating], [0., 90.]])
+        iead_B_temp, energy_range, angle_range = np.histogram2d(energies_B, angles_B, bins=(num_energies, num_angles), range=[[0., 4.*phi_floating], [0., 90.]])
+        iead_D += iead_D_temp
+        iead_B += iead_B_temp
+
+
+        #Plotting routine
+        if time_index%skip == 0:
+            plt.figure(1)
+            plt.clf()
+            plt.plot(grid.domain, grid.phi)
+            plt.draw()
+            plt.savefig('pic_bca_phi'+str(time_index))
+            plt.pause(0.001)
+
+            plt.figure(2)
+            plt.clf()
+            plt.scatter(positions, velocities, s=0.5, c=colors-1., cmap='jet')
+            plt.axis((0., L, -6.0*particles[0].vth, 6.0*particles[0].vth))
+            plt.draw()
+            plt.savefig('pic_bca_ps'+str(time_index))
+            plt.pause(0.001)
+
+            plt.figure(3)
+            plt.clf()
+            plt.pcolormesh(angle_range, energy_range, iead_D.transpose())
+            plt.draw()
+            plt.pause(0.001)
+
+            plt.figure(4)
+            plt.clf()
+            plt.pcolormesh(angle_range, energy_range, iead_B.transpose())
+            plt.draw()
+            plt.pause(0.001)
+        #end if
+    #end for time_index
+    plt.figure(3)
+    plt.savefig('iead_D')
+    plt.figure(4)
+    plt.savefig('iead_B')
+    new_particle_list_D_s, new_particle_list_D_r = tridyn_interface_D_B.run_tridyn_simulations_from_iead(energy_range, angle_range, iead_D, number_histories=number_histories)
+    new_particle_list_B_s, new_particle_list_B_r = tridyn_interface_B_B.run_tridyn_simulations_from_iead(energy_range, angle_range, iead_B, number_histories=number_histories)
+    num_incident_B = np.sum(iead_B)
+    num_deposited_B = np.sum(iead_B) - len(new_particle_list_B_r)//number_histories
+    num_reflected_B = len(new_particle_list_B_r)//number_histories
+    num_sputtered_B = len(new_particle_list_B_s)//number_histories + len(new_particle_list_D_s)//number_histories
+    print(f'num_deposited: {num_deposited_B}, num_sputtered: {num_sputtered_B}, {num_reflected_B}, {num_incident_B}')
+
 def pic_bca():
     #Imports and constants
     import generate_ftridyn_input as gen
-    density = 5e16
+    density = 1e20
     N = 100000
     timesteps = 1000
     ng = 300
-    dt = 1e-9
-    Ti = 100.*11600
-    Te = 200.*11600
+    dt = 1e-10
+    Ti = 15.*11600
+    Te = 30.*11600
     LD = np.sqrt(kb*Te*epsilon0/e/e/density)
     L = 200.*LD
     p2c = density*L/N
-    B0 = np.array([1.0, 0.0, 0.0])
+    alpha = 88.0*np.pi/180.0
+    B0 = np.array([2.0*np.cos(alpha), 2.0*np.sin(alpha), 0.0])
     E0 = np.array([0.0, 0.0, 0.0])
     number_histories = 100
     num_energies = 5
@@ -784,14 +1154,15 @@ def pic_bca():
     mfp = 5.*LD
 
     #Skip every 10th plot
-    skip=1
+    skip=10
 
     #Calculate floating potential
     phi_floating = (Te/11600.)*0.5*np.log(1.*mp/2./np.pi/me/(1.+Ti/Te))
     print(f'Floating potential: {phi_floating} V')
 
     #Initialize objects, generators, and counters
-    grid = Grid(ng, L, Te)
+    grid = Grid(ng, L, Te, bc='dirichlet-neumann')
+
     particles = [Particle(1.*mp, e, p2c, Ti, Z=1, B0=B0, E0=E0, grid=grid) \
         for _ in range(N - N//10)]
 
@@ -805,6 +1176,7 @@ def pic_bca():
     impurity_distribution = source_distribution_6D(grid, Ti, 10.81*mp)#, -3.*impurities[0].vth)
     num_deposited = 0
     num_sputtered = 0
+    run_tridyn = False
 
     #Construct energy and angle range and empty iead array
     angle_range = np.linspace(0.0, 90.0, num_angles)
@@ -817,8 +1189,6 @@ def pic_bca():
     fig2 = plt.figure(2)
     plt.ion()
     fig3 = plt.figure(3)
-    plt.ion()
-    fig4 = plt.figure(4)
 
     #Start of time loop
     time = 0.
@@ -837,12 +1207,12 @@ def pic_bca():
 
         time += dt
         grid.weight_particles_to_grid_boltzmann(particles, dt)
+        print(f'n0: {grid.n0}\nadded_particles: {grid.added_particles}')
         grid.reset_added_particles()
         grid.solve_for_phi_dirichlet_boltzmann()
         grid.differentiate_phi_to_E_dirichlet()
 
         print(f'timestep: {time_index}')
-        print(f'n0: {grid.n0}\nadded_particles: {grid.added_particles}')
         print(f'phi_max: {np.max(grid.phi)}')
         print(f'number deposited: {num_deposited}')
         print(f'number sputtered: {num_sputtered}')
@@ -870,7 +1240,7 @@ def pic_bca():
                         angles_H.append(particle.get_angle_wrt_wall())
                     #end if
                     if particle.Z == 5:
-                        energies_B.append(particle.kinetirc_energy/e)
+                        energies_B.append(particle.kinetic_energy/e)
                         angles_B.append(particle.get_angle_wrt_wall())
                     #end if
             #If particle is not active, reinitialize as either source H or impurity B
@@ -888,46 +1258,46 @@ def pic_bca():
         iead_H, energies_H, angles_H = np.histogram2d(energies_H, angles_H, bins=(num_energies,num_angles))
         iead_B, energies_B, angles_B = np.histogram2d(energies_B, angles_B, bins=(num_energies,num_angles))
 
-        #Run F-TRIDYN for the collected IEADs
-        new_particle_list_H_s, new_particle_list_H_r = tridyn_interface.run_tridyn_simulations_from_iead(energies_H, angles_H, iead_H, number_histories=number_histories)
-        new_particle_list_B_s, new_particle_list_B_r = tridyn_interface_B.run_tridyn_simulations_from_iead(energies_B, angles_B, iead_B, number_histories=number_histories)
+        if run_tridyn:
+            #Run F-TRIDYN for the collected IEADs
+            new_particle_list_H_s, new_particle_list_H_r = tridyn_interface.run_tridyn_simulations_from_iead(energies_H, angles_H, iead_H, number_histories=number_histories)
+            new_particle_list_B_s, new_particle_list_B_r = tridyn_interface_B.run_tridyn_simulations_from_iead(energies_B, angles_B, iead_B, number_histories=number_histories)
 
+            #Concatenate H and B lists from every NHth particle
+            new_particle_list = new_particle_list_H_s[::number_histories] +\
+                new_particle_list_H_r[::number_histories] +\
+                new_particle_list_B_s[::number_histories] +\
+                new_particle_list_B_r[::number_histories]
 
-        #Concatenate H and B lists from every NHth particle
-        new_particle_list = new_particle_list_H_s[::number_histories] +\
-            new_particle_list_H_r[::number_histories] +\
-            new_particle_list_B_s[::number_histories] +\
-            new_particle_list_B_r[::number_histories]
+            #Count number of deposited Boron
+            num_deposited += np.sum(iead_B) - len(new_particle_list_B_r[::number_histories])
 
+            num_sputtered += len(new_particle_list_B_s[::number_histories]) +\
+                len(new_particle_list_H_s[::number_histories])
 
-        #Count number of deposited Boron
-        num_deposited += np.sum(iead_B) - len(new_particle_list_B_r[::number_histories])
+            #Create empty new particle array for reflected and sputtered particles
+            new_particles = [None]*len(new_particle_list)
+            composition_B = 0.
+            for index, row in enumerate(new_particle_list):
+                #Choose left or right wall, flip cos(alpha) appropriately
+                if np.random.choice((True, False)):
+                    x0 = mfp*abs(row[1])
+                    row[1] = abs(row[1])
+                else:
+                    x0 = grid.length - mfp*abs(row[1])
+                    row[1] = -abs(row[1])
+                #end if
+                #Create new particle
+                new_particles[index] = particle_from_energy_angle_coordinates(*row, q=e, p2c=p2c, T=Ti, grid=grid, x0=x0,
+                    time=time, B=B0)
+                #Keep track of added charges for Botlzmann solver
+                grid.add_particles(p2c)
+            #end for
 
-        num_sputtered += len(new_particle_list_B_s[::number_histories]) +\
-            len(new_particle_list_H_s[::number_histories])
-
-        #Create empty new particle array for reflected and sputtered particles
-        new_particles = [None]*len(new_particle_list)
-        composition_B = 0.
-        for index, row in enumerate(new_particle_list):
-            #Choose left or right wall, flip cos(alpha) appropriately
-            if np.random.choice((True, False)):
-                x0 = mfp*abs(row[1])
-                row[1] = abs(row[1])
-            else:
-                x0 = grid.length - mfp*abs(row[1])
-                row[1] = -abs(row[1])
-            #end if
-            #Create new particle
-            new_particles[index] = particle_from_energy_angle_coordinates(*row, q=e, p2c=p2c, T=Ti, grid=grid, x0=x0,
-                time=time, B=B0)
-            #Keep track of added charges for Botlzmann solver
-            grid.add_particles(p2c)
-        #end for
-
-        #Concatenate particle and new particle lists
-        particles += new_particles
-        N = len(particles)
+            #Concatenate particle and new particle lists
+            particles += new_particles
+            N = len(particles)
+        #end if
 
         #Plotting routine
         if time_index%skip == 0:
@@ -950,12 +1320,6 @@ def pic_bca():
             plt.pcolormesh(energies_H, angles_H, iead_H)
             plt.draw()
             plt.pause(0.001)
-
-            plt.figure(4)
-            plt.clf()
-            if np.size(new_particle_list_H_s) > 0: plt.hist(np.atleast_2d(new_particle_list_H_s)[:,0], bins=10)
-            plt.draw()
-            plt.pause(0.001)
         #end if
     #end for time_index
 
@@ -965,114 +1329,8 @@ def pic_bca():
 #end def pic_bca
 
 def main():
-    density = 5e16
-    N = 10000
-    T = 1000
-    ng = 300
-    dt_small = 1e-9
-    dt_large = 1e-8
-    Ti = 10.0*11600.
-    Te = 10.0*11600.
-    LD = np.sqrt(kb*Te*epsilon0/e/e/density)
-    L = 200*LD
-    p2c = L*density/N
-    B0 = np.array([0.0, 0.0, 0.0])
-    E0 = np.array([0.0, 0.0, 0.0])
-
-    phi_floating = (Te/11600.)*0.5*np.log(1.0*mp/2./np.pi/me/(1.+Ti/Te))
-    print(f'Floating potential: {phi_floating} V')
-
-    fig1 = plt.figure(1)
-    plt.ion()
-    fig2 = plt.figure(2)
-    plt.ion()
-    fig3 = plt.figure(3)
-    plt.ion()
-
-    np.random.seed(1)
-    grid = Grid(ng, L, Te)
-    particles = [Particle(1.0*mp, e, p2c, Ti, Z=1, B0=B0, E0=E0, grid=grid) for i in range(N)]
-
-    file = open('particle_output.txt','w+')
-    positions_x = np.zeros(N)
-    positions_y = np.zeros(N)
-    positions_z = np.zeros(N)
-    velocities = np.zeros(N)
-    colors = np.zeros(N)
-    E_t = np.zeros(T+1)
-    phi_max_t = np.zeros(T+1)
-
-    #sputtered_distribution = thompson_distribution_isotropic_6D(6.0, mp, grid, grid.dx)
-    sputtered_distribution = distribution_from_file('ftridyn/sim0010/H_B_0011SPLST.OUT', mp, grid, 1.0*LD)
-    #reflected_distribution = itertools.cycle(distribution_from_file('ftridyn/sim0010/H_B_0011RFLST.OUT', 5.*mp, grid, 2.*grid.dx))
-    source_distribution = source_distribution_6D(grid, Ti, mp)
-    sputtering_threshold = 28.0*e
-
-    time = 0.
-    for time_index in range(T+1):
-        print(f'timestep: {time_index}')
-        time += dt_small
-        grid.weight_particles_to_grid_boltzmann(particles, dt_small)
-        print(f'n0: {grid.n0}\nadded_particles: {grid.added_particles}')
-        grid.reset_added_particles()
-
-        grid.solve_for_phi_dirichlet_boltzmann()
-        print(f'phi_max: {np.max(grid.phi)}')
-
-        grid.differentiate_phi_to_E_dirichlet()
-        E_t[time_index] = np.dot(grid.E, grid.E)
-        phi_max_t[time_index] = np.max(grid.phi)
-
-        for index, particle in enumerate(particles):
-            if particle.is_active():
-                positions_x[index] = particle.r[0]
-                velocities[index] = particle.r[3]
-                colors[index] = particle.color
-                particle.interpolate_electric_field_dirichlet(grid)
-                particle.push_6D(dt_small)
-                particle.apply_BCs_dirichlet(grid)
-            else:
-                if (particle.kinetic_energy > sputtering_threshold) and index%10==0:
-                    particle.reactivate(sputtered_distribution, grid, time, 293/10000, 10.81*mp, 1.*e, 5)
-                    particle.color = 1
-                else:
-                    particle.reactivate(source_distribution, grid, time, p2c, 1.*mp, 1.*e, 1)
-                    particle.color = 0
-                #end if
-
-            #end if
-        #end for
-
-        if time_index%1 ==0:
-            plt.figure(1)
-            plt.clf()
-            plt.scatter(positions_x, velocities, s=1.0, c=colors, cmap='jet')
-            plt.axis((0.0, grid.length, -8.0*particles[0].vth, 8.0*particles[0].vth))
-            plt.draw()
-            plt.pause(0.01)
-            plt.savefig('plots/ps_'+str(time_index))
-
-            plt.figure(2)
-            plt.clf()
-            plt.plot(grid.domain, grid.phi)
-            plt.draw()
-            plt.pause(0.01)
-            plt.savefig('plots/phi_'+str(time_index))
-
-            plt.figure(3)
-            plt.clf()
-            plt.plot(np.linspace(0.0,time,time_index), phi_max_t[:time_index])
-            plt.plot(np.linspace(0.0,time,time_index), phi_floating*np.ones(time_index))
-            plt.draw()
-            plt.pause(0.01)
-            plt.savefig('plots/phi_t_'+str(time_index))
-        #end if
-    #end for
-    plt.show()
-
-    c.convert('plots','ps',0,T,10,'out_ps.gif')
-    c.convert('plots','phi',0,T,10,'out_phi.gif')
-    c.convert('plots','phi_t',0,T,10,'out_phi_t.gif')
+    run_tests()
+    pic_iead()
 #end def main
 
 def run_tests():
@@ -1081,5 +1339,4 @@ def run_tests():
 #end def run_tests
 
 if __name__ == '__main__':
-    run_tests()
-    pic_bca()
+    main()
