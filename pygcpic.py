@@ -47,6 +47,7 @@ def particle_from_energy_angle_coordinates(energy, ca, cb, cg, m, Z,
     particle.r[0] = x0
     particle.time = time
     particle.B[:] = B
+    particle.from_wall = 1
     return particle
 #end def particle_from_energy_angle_coordinates
 
@@ -90,6 +91,8 @@ class Particle:
         self.B = B0
         #Electric field at particle position
         self.active = 1
+        self.at_wall = 0
+        self.from_wall = 0
         if grid != None: self._initialize_6D(grid)
     #end def __init__
 
@@ -319,6 +322,33 @@ class Particle:
         w_r = 1.0 - w_l
         self.E[0] = grid.E[ind]*w_l + grid.E[ind+1]*w_r
     #end def interpolate_electric_field
+
+    def attempt_first_ionization(self, dt, cross_section, temperature, grid):
+        '''
+        Monte Carlo Collision of first ionization, assuming constant cross-section.
+
+        Args:
+            dt (float): timestep in s
+            cross_section (float): cross section in m2
+            temperature (float): background temperature in K
+            density (float): background density in m-3
+
+        '''
+        index_l = int(np.floor(self.x/grid.dx))
+        index_r = (index_l + 1)
+        w_r = (self.x%grid.dx)/grid.dx
+        w_l = 1.0 - w_r
+
+        density = w_l*grid.n[index_l] + w_r*grid.n[index_r]
+
+        mfp = 1./(density*cross_section)
+
+        probability = 1. - np.exp(-density*cross_section*dt*self.speed)
+
+        #print(f'p: {probability} mfp: {mfp} n: {density} speed: {self.speed}')
+
+        if np.random.uniform(0., 1.) < probability and self.q == 0.:
+            self.q = e
 
     def push_6D(self,dt):
         '''
@@ -551,8 +581,31 @@ class Particle:
         '''
         if (self.r[0] <= 0.0) or (self.r[0] >= grid.length):
             self.active = 0
+            self.at_wall = 1
         #end if
     #end def apply_BCs_dirichlet
+
+    def apply_BCs_impurity_fluxes_out(self, grid, Z_to_capture):
+        '''
+        Set particle to inactive when it crosses middle boundary from wall, and
+        returns self if captured, None if not.
+
+        Args:
+            grid (Grid): grid object with which the particle is associated
+
+        Returns:
+            self (Particle): particle object that has left interior domain
+        '''
+
+        grid_middle_index = grid.ng//2
+        grid_middle_x = grid.dx*grid_middle_index
+
+        if self.Z == Z_to_capture and self.from_wall and self.is_active():
+            if (self.x < grid_middle_x and self.v_x < 0.) or (self.x > grid_middle_x and self.v_x > 0.):
+                self.active = 0
+                self.at_wall = 0
+                return self
+        return None
 
     def reactivate(self, distribution, grid, time, p2c, m, q, Z):
         '''
@@ -580,6 +633,8 @@ class Particle:
         self.Z = Z
         self.r[6] = time
         self.active = 1
+        self.at_wall = 0
+        self.from_wall = 1
         grid.add_particles(p2c)
     #end def reactivate
 #end class Particle
@@ -639,7 +694,7 @@ class Grid:
         elif bc == 'dirichlet-neumann':
             self._fill_laplacian_dirichlet_neumann()
             print(self.A)
-        elif type(bc) != 'str':
+        elif type(bc) != type(''):
             raise TypeError('bc must be a string')
         else:
             raise ValueError('Unimplemented boundary condition. Choose dirichlet_dirichlet or dirichlet_neumann')
@@ -878,8 +933,8 @@ class Grid:
 
             J = self.A + D
             J = spp.csc_matrix(J)
-            dphi = sppla.inv(J).dot(F)
-
+            #dphi = sppla.inv(J).dot(F)
+            dphi, _ = sppla.bicgstab(J, F, x0=self.phi)
             phi = phi - dphi
             residual = la.norm(dphi)
             iter += 1
@@ -950,7 +1005,7 @@ def pic_iead():
     density = 1e20
     densities_boron = [1e11, 1e12, 1e12, 1e11, 1e13]
     N = 10000
-    timesteps = 200
+    timesteps = 10
     ng = 600
     dt = 1e-10
     Ti = 15.*11600.
@@ -1101,7 +1156,7 @@ def pic_iead():
 
             plt.figure(2)
             plt.clf()
-            plt.scatter(positions, velocities, s=0.5, c=colors-1., cmap='jet')
+            plt.scatter(positions, velocities, s=0.5, c=colors-1., cmap='viridis')
             plt.axis((0., L, -6.0*particles[0].vth, 6.0*particles[0].vth))
             plt.draw()
             plt.savefig('pic_bca_ps'+str(time_index))
@@ -1132,42 +1187,199 @@ def pic_iead():
     num_sputtered_B = len(new_particle_list_B_s)//number_histories + len(new_particle_list_D_s)//number_histories
     print(f'num_deposited: {num_deposited_B}, num_sputtered: {num_sputtered_B}, {num_reflected_B}, {num_incident_B}')
 
+def pic_bca_aps():
+    import fractal_tridyn.utils.generate_ftridyn_input as gen
+    density = 1e19
+    N = 10000
+    source_N = N
+    timesteps = 1000
+    ng = 200
+    dt = 1e-10
+    Ti = 50.*11600
+    Te = 200.*11600
+    LD = np.sqrt(kb*Te*epsilon0/e/e/density)
+    L = 100.*LD
+    p2c = density*L/N
+    alpha = 86.0*np.pi/180.0
+    B0 = 2.
+    E0 = 0.
+    B = np.array([B0*np.cos(alpha), B0*np.sin(alpha), 0.0])
+    E = np.array([E0*np.cos(alpha), B0*np.sin(alpha), 0.0])
+    cross_section = 1e-20
+
+    #TRIDYN params
+    number_histories = 100
+
+    grid = Grid(ng, L, Te, bc='dirichlet-dirichlet')
+    particles = [Particle(39.948*mp, e, p2c, Ti, Z=18, B0=B, E0=E, grid=grid)
+        for _ in range(N)]
+
+    tridyn_interface_Ar_B = gen.tridyn_interface('Ar', 'B')
+    tridyn_interface_B_B  = gen.tridyn_interface('B', 'B')
+
+    source_distribution = source_distribution_6D(grid, Ti, 39.948*mp)
+
+    plt.ion()
+    plt.figure(1)
+    plt.figure(2)
+
+    color_dict = {
+        5: 'black',
+        18: 'red',
+        -5: 'blue',
+        -18: 'green'
+    }
+
+    size_dict = {
+            e: 0.5,
+            0.: 1.0
+        }
+
+    R_Ar_B = 0.
+    R_B_B = 0.
+    Y_B = 0.
+    time = 0.
+    for time_index in range(timesteps):
+        energies_Ar = []
+        angles_Ar = []
+        energies_B = []
+        angles_B = []
+
+        positions = np.zeros(N)
+        velocities = np.zeros(N)
+        colors = ['black']*N
+        sizes = [1.0]*N
+
+        time += dt
+        print(f'time: {time_index}')
+        print(f'total yield: {Y_B}')
+        print(f'Ar reflection: {R_Ar_B}')
+        print(f'B reflection: {R_B_B}')
+        print(f'active particles: {sum(1 for p in particles if p.is_active())}')
+
+        grid.weight_particles_to_grid_boltzmann(particles, dt)
+        grid.reset_added_particles()
+        grid.solve_for_phi_dirichlet_boltzmann()
+        grid.differentiate_phi_to_E_dirichlet()
+
+        for particle_index, particle in enumerate(particles):
+            if particle.is_active():
+                particle.interpolate_electric_field_dirichlet(grid)
+                particle.push_6D(dt)
+                particle.apply_BCs_dirichlet(grid)
+
+                #plotting storage
+                positions[particle_index] = particle.x
+                velocities[particle_index] = particle.v_x
+                colors[particle_index] = color_dict[particle.Z]
+                sizes[particle_index] = size_dict[particle.q]
+
+                #particle active and neutral, attempt mcc ionization
+                if particle.q == 0.:
+                    particle.attempt_first_ionization(dt, cross_section, Te, grid)
+
+                #particle just deactivate at wall
+                if not particle.is_active() and particle.at_wall:
+                    if particle.Z == 5:
+                        energies_B.append(particle.kinetic_energy/e)
+                        angles_B.append(particle.get_angle_wrt_wall())
+                    if particle.Z == 18:
+                        energies_Ar.append(particle.kinetic_energy/e)
+                        angles_Ar.append(particle.get_angle_wrt_wall())
+
+            else: #particle is not active at start of loop
+                if sum(1 for p in particles if (p.Z==1 and p.is_active)) < source_N:
+                    particle.reactivate(source_distribution, grid, time, p2c, 39.948*mp, e, 18)
+        #end particle loop
+
+        sputtered_Ar_B, reflected_Ar_B = tridyn_interface_Ar_B.run_tridyn_simulations_from_list(energies_Ar, angles_Ar, number_histories=number_histories)
+        sputtered_B_B, reflected_B_B = tridyn_interface_B_B.run_tridyn_simulations_from_list(energies_B, angles_B, number_histories=number_histories)
+
+        try:
+            R_Ar_B = len(reflected_Ar_B[::number_histories]) / len(energies_Ar)
+            Y_B = (len(sputtered_Ar_B[::number_histories]) + len(sputtered_B_B[::number_histories])) / (len(energies_Ar) + len(energies_B))
+        except ZeroDivisionError:
+            R_ar_B = 0.
+            Y_B = 0.
+
+        new_particle_list = sputtered_Ar_B[::number_histories] + \
+            reflected_Ar_B[::number_histories] + \
+            sputtered_B_B[::number_histories] + \
+            reflected_B_B[::number_histories]
+
+        new_particles = [None]*len(new_particle_list)
+        for index, row in enumerate(new_particle_list):
+            if np.random.choice((True, False)):
+                x0 = np.random.uniform(0., 1.)*grid.dx
+                row[1] = abs(row[1])
+            else:
+                x0 = grid.length - np.random.uniform(0., 1.)*grid.dx
+                row[1] = -abs(row[1])
+
+            new_particles[index] = particle_from_energy_angle_coordinates(*row,
+                q=0., p2c=p2c, T=Ti, grid=grid, x0=x0, time=time, B=B0)
+            grid.add_particles(p2c)
+
+        particles += new_particles
+        N = len(particles)
+
+        plt.figure(1)
+        plt.clf()
+        plt.scatter(positions, velocities, s=sizes, c=colors)
+        plt.axis([0.0, grid.length, -6.*particles[0].vth, 6.*particles[0].vth])
+        plt.draw()
+        plt.pause(0.0001)
+
+        plt.figure(2)
+        plt.clf()
+        plt.plot(np.linspace(0., grid.length, grid.ng), grid.phi)
+        plt.axis([0.0, grid.length, 0.0, np.max(grid.phi)])
+        plt.draw()
+        plt.pause(0.0001)
+
+    breakpoint()
+
+
 def pic_bca():
     #Imports and constants
-    import generate_ftridyn_input as gen
-    density = 1e20
-    N = 100000
+    import fractal_tridyn.utils.generate_ftridyn_input as gen
+    density = 1e19
+    N = 10000
+    source_N = N
     timesteps = 1000
-    ng = 300
+    ng = 150
     dt = 1e-10
-    Ti = 15.*11600
-    Te = 30.*11600
+    Ti = 50.*11600
+    Te = 60.*11600
     LD = np.sqrt(kb*Te*epsilon0/e/e/density)
-    L = 200.*LD
+    L = 100.*LD
+    print(f'L: {L}')
     p2c = density*L/N
-    alpha = 88.0*np.pi/180.0
-    B0 = np.array([2.0*np.cos(alpha), 2.0*np.sin(alpha), 0.0])
-    E0 = np.array([0.0, 0.0, 0.0])
-    number_histories = 100
-    num_energies = 5
-    num_angles = 5
-    mfp = 5.*LD
+    alpha = 86.0*np.pi/180.0
+    B0 = 2.
+    B = np.array([B0*np.cos(alpha), B0*np.sin(alpha), 0.0])
+    cross_section = 1e-16
 
-    #Skip every 10th plot
-    skip=10
+    E0 = 0.
+    E = np.array([E0, E0, E0])
+
+    number_histories = 100
+    num_energies = 25
+    num_angles = 20
+    iead = np.zeros((num_energies, num_angles))
+
+    #Skip every nth plot
+    skip = 1
 
     #Calculate floating potential
     phi_floating = (Te/11600.)*0.5*np.log(1.*mp/2./np.pi/me/(1.+Ti/Te))
     print(f'Floating potential: {phi_floating} V')
 
     #Initialize objects, generators, and counters
-    grid = Grid(ng, L, Te, bc='dirichlet-neumann')
+    grid = Grid(ng, L, Te, bc='dirichlet-dirichlet')
 
-    particles = [Particle(1.*mp, e, p2c, Ti, Z=1, B0=B0, E0=E0, grid=grid) \
-        for _ in range(N - N//10)]
-
-    #impurities = [Particle(10.81*mp, e, p2c, Ti, Z=5, B0=B0, E0=E0, grid=grid) \
-    #    for _ in range(N//10)]
+    particles = [Particle(1.*mp, e, p2c, Ti, Z=1, B0=B, E0=E, grid=grid) \
+        for _ in range(N)]
 
     #particles += impurities
     tridyn_interface = gen.tridyn_interface('H', 'B')
@@ -1176,7 +1388,9 @@ def pic_bca():
     impurity_distribution = source_distribution_6D(grid, Ti, 10.81*mp)#, -3.*impurities[0].vth)
     num_deposited = 0
     num_sputtered = 0
-    run_tridyn = False
+    H_reflection_coefficient = 0.
+    total_sputtering_yield = 0.
+    run_tridyn = True
 
     #Construct energy and angle range and empty iead array
     angle_range = np.linspace(0.0, 90.0, num_angles)
@@ -1184,15 +1398,18 @@ def pic_bca():
     iead_average = np.zeros((len(energy_range), len(angle_range)))
 
     #Initialize figures
+    plt.ion()
     fig1 = plt.figure(1)
-    plt.ion()
     fig2 = plt.figure(2)
-    plt.ion()
     fig3 = plt.figure(3)
 
     #Start of time loop
     time = 0.
     composition_B = 0.
+    impurity_energies_out = []
+    impurity_angles_out = []
+    source_energies_out = []
+    source_angles_out = []
     for time_index in range(timesteps+1):
         #Clear iead collection arrays
         energies_H = []
@@ -1216,6 +1433,9 @@ def pic_bca():
         print(f'phi_max: {np.max(grid.phi)}')
         print(f'number deposited: {num_deposited}')
         print(f'number sputtered: {num_sputtered}')
+        print(f'H reflection coefficient: {H_reflection_coefficient}')
+        print(f'total B sputtering yield: {total_sputtering_yield}')
+        print(f'active particles: {sum(1 for p in particles if p.is_active())}')
 
         #Begin particle loop
         for particle_index, particle in enumerate(particles):
@@ -1224,17 +1444,35 @@ def pic_bca():
                 #Store particle coordinates for plotting
                 positions[particle_index] = particle.x
                 velocities[particle_index] = particle.v_x
-                colors[particle_index] = particle.Z
 
-                #Interpolate E, push in time, and apply BCs
+                if particle.q == 0.0:
+                    if particle.Z == 1:
+                        colors[particle_index] = 0.0
+                    if particle.Z == 5:
+                        colors[particle_index] = 0.3
+                elif particle.Z == 1:
+                    colors[particle_index] = 0.6
+                elif particle.Z == 5:
+                    colors[particle_index] = 0.9
+
+                #Check if particle is deactivated at interior domain
+                source_particle_out = particle.apply_BCs_impurity_fluxes_out(grid, 1)
+                if not source_particle_out is None:
+                    source_energies_out.append(source_particle_out.kinetic_energy/e)
+                    source_angles_out.append(source_particle_out.get_angle_wrt_wall())
+
+                impurity_particle_out = particle.apply_BCs_impurity_fluxes_out(grid, 5)
+                if not impurity_particle_out is None:
+                    impurity_energies_out.append(impurity_particle_out.kinetic_energy/e)
+                    impurity_angles_out.append(impurity_particle_out.get_angle_wrt_wall())
+
+                #Interpolate E, push in time, and apply wall BCs
                 particle.interpolate_electric_field_dirichlet(grid)
                 particle.push_6D(dt)
                 particle.apply_BCs_dirichlet(grid)
 
-                if particle.Z == 5: composition_B += 1./len(particles)
-
                 #If particle is deactivated at wall, store in iead colleciton arrays
-                if not particle.is_active():
+                if (not particle.is_active()) and particle.at_wall:
                     if particle.Z == 1:
                         energies_H.append(particle.kinetic_energy/e)
                         angles_H.append(particle.get_angle_wrt_wall())
@@ -1243,25 +1481,46 @@ def pic_bca():
                         energies_B.append(particle.kinetic_energy/e)
                         angles_B.append(particle.get_angle_wrt_wall())
                     #end if
-            #If particle is not active, reinitialize as either source H or impurity B
+
+                if particle.Z == 5: composition_B += 1./len(particles)
+
+                if particle.q == 0. and particle.is_active():
+                    temperature = Ti
+                    particle.attempt_first_ionization(dt, cross_section, temperature, grid)
+
+            #If particle is not active, and domain needs more particles,
+            # reinitialize as either source H
             else:
-                if np.random.choice((True, True), p=(0.90, 0.10)):
+                #if np.random.choice((True, True), p=(0.90, 0.10)):
+                if sum(1 for p in particles if (p.Z == 1 and p.is_active())) < source_N:
                     particle.reactivate(source_distribution, grid, time, p2c, 1.*mp, 1.*e, 1)
-                else:
-                    particle.reactivate(impurity_distribution, grid, time, p2c, 10.81*mp, 1.*e, 5)
+                #else:
+                #    particle.reactivate(impurity_distribution, grid, time, p2c, 10.81*mp, 1.*e, 5)
             #end if
         #end for particle_index, particle
 
         print(f'Percent Boron: {composition_B * 100.}')
 
         #Collect iead arrays into 2D IEAD histogram
-        iead_H, energies_H, angles_H = np.histogram2d(energies_H, angles_H, bins=(num_energies,num_angles))
-        iead_B, energies_B, angles_B = np.histogram2d(energies_B, angles_B, bins=(num_energies,num_angles))
+        iead_H, energies_H_iead, angles_H_iead = np.histogram2d(energies_H, angles_H, bins=(num_energies,num_angles), range=((0., 400),(0., 90.)))
+        iead += iead_H
+        #iead_B, energies_B, angles_B = np.histogram2d(energies_B, angles_B, bins=(num_energies,num_angles))
 
         if run_tridyn:
             #Run F-TRIDYN for the collected IEADs
-            new_particle_list_H_s, new_particle_list_H_r = tridyn_interface.run_tridyn_simulations_from_iead(energies_H, angles_H, iead_H, number_histories=number_histories)
-            new_particle_list_B_s, new_particle_list_B_r = tridyn_interface_B.run_tridyn_simulations_from_iead(energies_B, angles_B, iead_B, number_histories=number_histories)
+            #new_particle_list_H_s, new_particle_list_H_r = tridyn_interface.run_tridyn_simulations_from_iead(energies_H, angles_H, iead_H, number_histories=number_histories)
+            #new_particle_list_B_s, new_particle_list_B_r = tridyn_interface_B.run_tridyn_simulations_from_iead(energies_B, angles_B, iead_B, number_histories=number_histories)
+
+            new_particle_list_H_s, new_particle_list_H_r = tridyn_interface.run_tridyn_simulations_from_list(energies_H, angles_H, number_histories=number_histories)
+            new_particle_list_B_s, new_particle_list_B_r = tridyn_interface_B.run_tridyn_simulations_from_list(energies_B, angles_B, number_histories=number_histories)
+
+            try:
+                total_sputtering_yield = (len(new_particle_list_H_s) + len(new_particle_list_B_s)) / (len(energies_H) + len(energies_B)) / number_histories
+                H_reflection_coefficient = len(new_particle_list_H_r) / len(energies_H) / number_histories
+            except ZeroDivisionError:
+                print('WARNING: Divide by zero')
+                total_sputtering_yield = 0
+                H_reflection_coefficient = 0
 
             #Concatenate H and B lists from every NHth particle
             new_particle_list = new_particle_list_H_s[::number_histories] +\
@@ -1270,7 +1529,7 @@ def pic_bca():
                 new_particle_list_B_r[::number_histories]
 
             #Count number of deposited Boron
-            num_deposited += np.sum(iead_B) - len(new_particle_list_B_r[::number_histories])
+            num_deposited += len(energies_B) - len(new_particle_list_B_r[::number_histories])
 
             num_sputtered += len(new_particle_list_B_s[::number_histories]) +\
                 len(new_particle_list_H_s[::number_histories])
@@ -1281,14 +1540,14 @@ def pic_bca():
             for index, row in enumerate(new_particle_list):
                 #Choose left or right wall, flip cos(alpha) appropriately
                 if np.random.choice((True, False)):
-                    x0 = mfp*abs(row[1])
+                    x0 = np.random.uniform(0.0, 1.0)*grid.dx
                     row[1] = abs(row[1])
                 else:
-                    x0 = grid.length - mfp*abs(row[1])
+                    x0 = grid.length - np.random.uniform(0.0, 1.0)*grid.dx
                     row[1] = -abs(row[1])
                 #end if
                 #Create new particle
-                new_particles[index] = particle_from_energy_angle_coordinates(*row, q=e, p2c=p2c, T=Ti, grid=grid, x0=x0,
+                new_particles[index] = particle_from_energy_angle_coordinates(*row, q=0., p2c=p2c, T=Ti, grid=grid, x0=x0,
                     time=time, B=B0)
                 #Keep track of added charges for Botlzmann solver
                 grid.add_particles(p2c)
@@ -1310,27 +1569,30 @@ def pic_bca():
 
             plt.figure(2)
             plt.clf()
-            plt.scatter(positions[::10], velocities[::10], s=0.5, c=colors[::10]-1., cmap='jet')
+            plt.scatter(positions, velocities, s=1, c=colors, cmap='winter')
+            plt.axis([0.0, L, -400000, 400000])
             plt.draw()
             plt.savefig('pic_bca_ps'+str(time_index))
             plt.pause(0.001)
 
             plt.figure(3)
             plt.clf()
-            plt.pcolormesh(energies_H, angles_H, iead_H)
+            plt.pcolormesh(angles_H_iead, energies_H_iead, iead)
             plt.draw()
             plt.pause(0.001)
         #end if
     #end for time_index
 
     #Create movies from .png plots
-    c.convert('.','pic_bca_ps',0,timesteps,1,'out_ps.gif')
-    c.convert('.','pic_bca_phi',0,timesteps,1,'out_phi.gif')
+    c.convert('.', 'pic_bca_ps', 0,timesteps, 1, 'out_ps.gif')
+    c.convert('.', 'pic_bca_phi', 0,timesteps, 1, 'out_phi.gif')
+
+    breakpoint()
 #end def pic_bca
 
 def main():
     run_tests()
-    pic_iead()
+    pic_bca_aps()
 #end def main
 
 def run_tests():
