@@ -257,6 +257,7 @@ def particle_push_p(x0, v0, q, m, E0, j0, N, Ng, p2c, dx, dt, L, tol, maxiter):
 
     #Picard loop
     while(r>tol) & (k<maxiter):
+
         #Find electric field at all particle positions using smoothed E-field
         E_interp = interpolate_p(smooth_field_p(Es), xs, Ng, N, dx)
 
@@ -419,7 +420,7 @@ def initialize_p(system, N, density, Kp, perturbation, dx, Ng, Te, Ti, L, X):
     p2c = L * density / N
     kBTe = kb*Te
     kBTi = kb*Ti
-    v_thermal = np.sqrt(2.0 * kBTe / me)
+    v_thermal = np.sqrt(kBTe / me)
     LD = np.sqrt(kBTe * epsilon0 / e / e / density)
 
     m = np.ones(N) * me
@@ -450,7 +451,7 @@ def initialize_p(system, N, density, Kp, perturbation, dx, Ng, Te, Ti, L, X):
     if system=='landau-damping':
         #Assign velocity initial distribution function
         v0 = np.zeros(N)
-        v0 = np.random.normal(0.0, v_thermal / np.sqrt(2) ,N)
+        v0 = np.random.normal(0.0, v_thermal, N)
         growth_rate = -np.sqrt(np.pi) * wp * (wp/K/v_thermal)**3 * np.exp(-1./(2.0 * K**2 * LD**2) - 3./2.)
     #end if
 
@@ -511,7 +512,8 @@ def implicit_pic(T, nplot, system, density, perturbation, Kp, N, Ng, Nv, Vmax, d
     print("p2c :", p2c)
     print("gamma: ",growth_rate)
 
-    fig6 = plt.figure(1,figsize=(20,10))
+    #fig6 = plt.figure(1,figsize=(20,10))
+    fig = plt.figure(1)
 
     #Initialize time-tracking arrays.
     KE = []
@@ -561,10 +563,10 @@ def implicit_pic(T, nplot, system, density, perturbation, Kp, N, Ng, Nv, Vmax, d
         x1, v1, E1, j1 = particle_push_p(x0, v0, q, m, E0, j0, N, Ng, p2c, dx, dt, L, tol, maxiter)
 
         #Set new n timestep from previous n+1 timestep
-        E0 = E1
-        x0 = x1
-        v0 = v1
-        j0 = j1
+        E0[:] = E1
+        x0[:] = x1
+        v0[:] = v1
+        j0[:] = j1
 
         #Find time-tracked information.
         TT.append(t * dt)
@@ -575,8 +577,15 @@ def implicit_pic(T, nplot, system, density, perturbation, Kp, N, Ng, Nv, Vmax, d
         trajectory_x.append(x0[tracer])
         trajectory_v.append(v0[tracer]/np.sqrt(kBTe/me))
 
+        plt.figure(1)
+        plt.clf()
+        plt.scatter(x0, v0/np.sqrt(kBTe/me), c='black', s=1)
+        #plt.draw()
+        plt.pause(0.01)
+
+        big_plot = False
         #Plotting routine
-        if (t % nplot == 0):
+        if (t % nplot == 0) and big_plot:
             fig6 = plt.figure(1)
             plt.clf()
             ax = fig6.subplots(2, 2)
@@ -702,6 +711,7 @@ def explicit_pic(T, nplot):
 
     scattermap = plt.cm.viridis( 1.0 - 2.0 * np.sqrt(v * v) / np.max( np.sqrt( v*v ) ) )
 
+    #Initialize arrays
     E = np.zeros(Ng)
     phi = np.zeros(Ng)
     j = np.zeros(Ng)
@@ -719,10 +729,12 @@ def explicit_pic(T, nplot):
         E = -differentiate_p(phi, dx, Ng)
         E_interp = np.zeros(N)
 
+        #Interpolate electric field to particle positions
         for i in range(N):
             E_interp[i] = interpolate_p(E, x[i], Ng, dx)
         #end for i
 
+        #Equation of motion
         vhalf = v + (q/m) * (dt*0.5) * E_interp
         xout = x + vhalf * dt
         vout = vhalf + (q/m) * (dt*0.5) * E_interp
@@ -730,6 +742,7 @@ def explicit_pic(T, nplot):
         x = xout % L
         v = vout
 
+        #Diagnostics
         EE.append(np.sum(epsilon0 * E*E / 2.))
         KE.append(np.sum(me * v*v / 2.)*p2c**2)
         TT.append(dt * t)
@@ -821,7 +834,7 @@ def main(T,nplot):
     """
     #system = 'two-stream'
     #density = 1e10
-    #perturbation = 0.2
+    #perturbation = 0.05
     #Kp = 1
     #N = 1000000
     #Ng = 50
@@ -831,22 +844,22 @@ def main(T,nplot):
     #L = 15.0 * np.sqrt(kb*Te * epsilon0/e/e/density)
     #L = np.sqrt(3.) * np.sqrt( e**2 * density / epsilon0 / me) / 2. / np.sqrt(kb*Te/me) / 2.
 
-    #system = 'bump-on-tail'
-    #density = 1e5
-    #perturbation = 0.1
-    #Kp = 1
-    #N = 1000000
-    #Ng = 50
-    #dt = 1e-5
-    #Ti = 0.1 * 11600.
-    #Te = 0.1 * 11600.
-    #L = 30.0 * np.sqrt(kb*Te * epsilon0/e/e/density)
+    # system = 'bump-on-tail'
+    # density = 1e5
+    # perturbation = 0.05
+    # Kp = 1
+    # N = 1000000
+    # Ng = 50
+    # dt = 2e-5
+    # Ti = 0.1 * 11600.
+    # Te = 0.1 * 11600.
+    # L = 30.0 * np.sqrt(kb*Te * epsilon0/e/e/density)
 
     #landau-damping best params
     system = 'landau-damping'
     density = 1e5 # [1/m3]
-    perturbation = 0.8
-    Kp = 1
+    perturbation = 0.15
+    Kp = 2
     N =  1000000
     Ng = 200
     dt = 1e-5 #[s]
@@ -863,5 +876,5 @@ def main(T,nplot):
 #end def main
 
 if __name__ == '__main__':
-    main(100,10)
+    main(1000, 1001)
 #end if
